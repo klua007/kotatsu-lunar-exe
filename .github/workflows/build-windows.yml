@@ -76,13 +76,32 @@ jobs:
       - name: Run test suite
         run: |
           New-Item -ItemType Directory -Force -Path build\classes\test | Out-Null
-          $src = Get-ChildItem desktop\src\test\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          $main = (Resolve-Path build\classes\main).Path
+          $test = (Resolve-Path build\classes\test).Path
           $stdlib = Join-Path $env:KOTLINC_HOME "lib\kotlin-stdlib.jar"
-          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn "-Xfriend-paths=build\classes\main" -classpath build\classes\main -d build\classes\test @src
-          if ($LASTEXITCODE -ne 0) { throw "test compilation failed" }
-          & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "build\classes\main;build\classes\test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
-            Tee-Object -FilePath build\test-output.log
-          if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE (see build\test-output.log)" }
+          if (-not (Test-Path $stdlib)) { throw "kotlin-stdlib.jar not found at $stdlib" }
+          $src = Get-ChildItem desktop\src\test\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          try {
+            & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn "-Xfriend-paths=$main" -classpath $main -d $test @src 2>&1 |
+              Tee-Object -FilePath build\test-compile.log
+            if ($LASTEXITCODE -ne 0) { throw "test compilation failed with exit code $LASTEXITCODE" }
+
+            & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "$main;$test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
+              Tee-Object -FilePath build\test-output.log
+            if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE" }
+          }
+          catch {
+            # The raw log is not always reachable from outside; annotations are (Actions API).
+            Write-Host "::error title=Desktop test suite::$($_.Exception.Message)"
+            foreach ($log in @("build\test-output.log", "build\test-compile.log")) {
+              if (Test-Path $log) {
+                Get-Content $log -Tail 20 | Where-Object { $_ -match '\S' } | ForEach-Object {
+                  Write-Host "::error file=$log::$($_.Replace('%','%25').Replace("`r",'').Replace("`n",' '))"
+                }
+              }
+            }
+            throw
+          }
 
       - name: Build runnable jar
         run: |
