@@ -13,7 +13,7 @@ Dependency audit of the parts that matter for a reader (from `app/build.gradle` 
 | --- | --- | --- |
 | UI | `androidx.compose.*`, `appcompat`, fragments, RecyclerView, ViewPager2, Material, `subsampling-scale-image-view` | nothing directly (all `android.*`) |
 | Data | Room + KSP, `androidx.collection`, `DocumentFile`, `SharedPreferences`, WorkManager | entity/column **design** and the backup JSON format |
-| Sources | `com.github.clquwu:kotatsu-parsers-redo` — parsers built on Android APIs (`android.util`, `AppCompat` WebView for CloudFlare, `okhttp` Android TLS) | the parser *interfaces* (`Manga`, `MangaChapter`, `MangaSource`) conceptually |
+| Sources | `com.github.clquwu:kotatsu-parsers-redo` — Kotlin/JVM parsers, but published only to JitPack and wired to Android via `androidx.*`, OkHttp interceptors and WebView hooks | the parser model and the HTTP protocol of each site (re-implemented for two sources, see §2.4a) |
 | Images | Coil 3 with Android decoders (WebP/AVIF/JXL via native libs) | JPEG/PNG/GIF/BMP via ImageIO |
 | Security/OS | biometrics, SAF, widgets, Discord RPC, Sentry Android, `conscrypt-android` | nothing |
 
@@ -47,9 +47,17 @@ Concretely:
    trivial because the field names already match (`manga_id`, `alt_title`, `nsfw`, `percent`, …).
    The store classes are the only place that knows about persistence, so swapping in SQLite later
    means re-implementing four small classes.
-4. **Content: the local source only** (`source = "LOCAL"`). CBZ/ZIP and folders of images are read
-   with `java.util.zip`/`java.nio`, pages decoded with `ImageIO`. Offline copies are plain CBZ files
-   under the data directory, the same artefact the Android app produces.
+4. **Content: local files plus two real online sources.**
+   * `LOCAL`: CBZ/ZIP and folders of images, read with `java.util.zip`/`java.nio`, pages decoded with
+     `ImageIO`. Offline copies are plain CBZ files under the data directory, the same artefact the
+     Android app produces.
+   * `NATIVE`: `MangaDexSource` (documented public JSON API) and `OpdsSource` (OPDS 1.2/Atom for
+     self-hosted catalogues), implemented on `java.net.http` with the in-repo JSON and XML parsers.
+     `docs/SOURCES.md` explains why the upstream parser pack is *not* bundled and what would be
+     needed to add it.
+   The source layer is deliberately independent of Swing: `MangaSource` is synchronous and returns
+   `SourceOutcome` (`Success` / `Failure` with a typed `SourceFailure`), so every failure has a
+   translated message and can be asserted in tests against a local HTTP server.
 5. **Interoperability with Android through the backup file.** `desktop/.../data/backup/` writes and
    reads the exact ZIP-of-JSON-arrays format of `BackupRepository`, so a phone backup can be restored
    and an exported backup can be taken back to the phone.
@@ -57,9 +65,10 @@ Concretely:
 ### Limitations of this choice (stated plainly)
 
 * Not a Material 3 UI; it is an honest, functional desktop layout.
-* Online sources, migrations between sources, sync and tracking are **not** available: they depend on
-  the parsers library and on Android runtime services. Titles imported from those sources are kept as
-  metadata (so a backup round-trips), and the UI says they cannot be opened.
+* Of the ~900 sources the Android app ships, this build implements two (MangaDex, OPDS). The rest
+  need the parser pack; they are listed in the Hub as unavailable with a reason (and titles imported
+  from them keep their metadata so a backup round-trips). Migrations between sources, sync and
+  tracking are still **not** available.
 * WebP/AVIF/JXL pages are not decoded (no native decoder); a message is shown instead of a blank page.
 * Two sources of truth for Android-side state: the desktop stores only what it can interpret, and
   unknown backup sections are preserved verbatim in `settings.json` rather than dropped.
@@ -81,22 +90,36 @@ desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/
 ├── data/
 │   ├── AppRepository.kt     façade used by the UI (library, history, progress, covers…)
 │   ├── model/Models.kt      entities mirroring the Android DB + JSON mapping
-│   ├── model/Ids.kt         deterministic FNV-1a ids for local content
-│   ├── store/               PersistentStore (debounced atomic JSON), Settings/Library/Activity
-│   ├── local/               ArchiveReader, ChapterContent, ImageCache, LocalImport
-│   ├── downloads/           DownloadService (offline CBZ)
-│   └── backup/              BackupSection, BackupService (Android-compatible)
+│   ├── model/Ids.kt         deterministic FNV-1a ids (local files and remote titles/chapters)
+│   ├── store/               PersistentStore (debounced atomic JSON), Settings/Library/Activity/Sources
+│   ├── local/               ArchiveReader, ChapterContent (+ remote pages), ImageCache, LocalImport
+│   ├── downloads/           DownloadService (offline CBZ, local and online)
+│   └── backup/              BackupSection, BackupService (Android-compatible, restores sources)
+├── sources/                 online source layer (see docs/SOURCES.md)
+│   ├── MangaSource.kt       contract implemented by every source
+│   ├── SourceRegistry.kt    catalogue, enable/pin, availability, OPDS catalogues
+│   ├── RemoteContentService.kt  page cache, archive download, CBZ writer
+│   ├── net/Http.kt          JDK HttpClient transport, mirror failover, URL helpers
+│   ├── mangadex/            MangaDex API client
+│   ├── opds/                OPDS 1.2 (Atom) client
+│   └── xml/Xml.kt           dependency-free XML/Atom parser
 ├── reader/ReadingProgress.kt  ported upstream progress logic
-└── ui/                      MainWindow (menu, sidebar, drop target), library, details, history,
-                             downloads, settings, dialogs, reader (paged + continuous canvases)
+└── ui/                      MainWindow (menu, sidebar, drop target), library, hub (Explore),
+                             details, history, downloads, settings, dialogs, reader
 ```
 
 ## 4. Threading and interactivity
 
-Swing's EDT stays responsive: imports, chapter loading, cover generation and page decoding run on a
-small worker pool (`ui/UiUtils.Async`) and results are delivered back to the EDT. Decoded pages live
-in an LRU (`PageImageCache`, 12 entries) with background preloading of the next two pages. Progress
-writes are debounced (250 ms) and flushed on close.
+Swing's EDT stays responsive: imports, chapter loading, searches, cover generation and page decoding
+run on a small worker pool (`ui/UiUtils.Async`) and results are delivered back to the EDT. Decoded
+pages live in an LRU (`PageImageCache`, 12 entries) with background preloading of the next two pages.
+Progress writes are debounced (250 ms) and flushed on close.
+
+Online access follows the same rule: `MangaSource` calls are blocking and are *always* invoked inside
+`Async.compute`, never on the EDT. The page cache (`<cache>/remote/pages/<chapterId>/`) is written
+atomically, so an interrupted read never produces a half image, and a page is fetched at most once.
+Searches run sources sequentially to respect per-host rate limits; a failure in one source is
+reported next to the results instead of aborting the whole search.
 
 ## 5. Reader implementation notes
 

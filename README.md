@@ -5,8 +5,13 @@
 > endorsed by, or supported by the Kotatsu-Redo maintainers. See [`NOTICE.md`](NOTICE.md).
 
 Kotatsu Lunar runs as a normal Windows program: a resizable window with mouse and keyboard control,
-a local library of your own CBZ/ZIP archives (or folders of images), four reading modes, offline
-copies, reading history and progress, and import/export of **Android Kotatsu backups**.
+a library of your own CBZ/ZIP archives (or folders of images) **and of online titles**, four reading
+modes, offline copies, reading history and progress, and import/export of **Android Kotatsu backups**.
+
+Online content comes from two real sources: **MangaDex** (public API) and **OPDS catalogues**
+(Komga, Kavita, self-hosted servers). The `Explore` screen is the Hub: enable/pin sources, check
+whether they answer, search, filter, add a title and read it. The other ~900 sources of the Android
+app are listed there as unavailable *with the reason* — nothing is faked.
 
 * **Prefer português?** Veja a seção [Português (Brasil)](#português-brasil) no fim deste arquivo.
 
@@ -17,14 +22,15 @@ copies, reading history and progress, and import/export of **Android Kotatsu bac
 | Runtime dependencies | none beyond the bundled Java runtime |
 | Licence | GPL-3.0 (same as upstream) |
 | Upstream commit | `d45b7c13de260b6c78de78ccbf968daf2187f1cf` |
-| Status | reading flow complete for local content; online sources not yet available — see [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) |
+| Online sources | MangaDex + OPDS implemented and tested offline; the Android parser pack is not bundled ([`docs/SOURCES.md`](docs/SOURCES.md)) |
+| Status | reading flow complete for local **and** online content — see [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) |
 
 ---
 
 ## 1. Install and run
 
 **Downloads:** [Releases](https://github.com/klua007/kotatsu-lunar-exe/releases) —
-`KotatsuLunar-0.1.0-windows-x64-portable.zip`, `KotatsuLunar-0.1.0.msi` and `kotatsu-lunar.jar`
+`KotatsuLunar-0.2.0-windows-x64-portable.zip`, `KotatsuLunar-0.2.0.msi` and `kotatsu-lunar.jar`
 built and smoke-tested on a Windows runner by
 [this workflow](https://github.com/klua007/kotatsu-lunar-exe/actions/workflows/build-windows.yml).
 
@@ -55,7 +61,8 @@ java -jar kotatsu-lunar.jar        # needs Java 17 or newer
 | What | Path |
 | --- | --- |
 | Library, history, favourites, settings | `%APPDATA%\KotatsuLunar` (`library.json`, `activity.json`, `settings.json`) |
-| Covers / page cache (safe to delete) | `%LOCALAPPDATA%\KotatsuLunar\cache` |
+| Enabled/pinned sources and OPDS catalogues | `%APPDATA%\KotatsuLunar\sources.json` |
+| Covers / online page cache (safe to delete) | `%LOCALAPPDATA%\KotatsuLunar\cache` (`covers`, `remote/pages`, `remote/archives`) |
 | Offline copies (CBZ) | `%APPDATA%\KotatsuLunar\downloads` |
 | Backups | `%APPDATA%\KotatsuLunar\backups` |
 | Logs | `%APPDATA%\KotatsuLunar\logs\kotatsu.log` |
@@ -72,6 +79,22 @@ being deleted, and the application starts with defaults.
 2. Double-click a cover to open the details screen and its chapter list.
 3. Double-click a chapter (or press **Continue reading**) to open the reader.
 4. Reading position is saved automatically; the title appears under **History** with its percentage.
+
+### Reading something online
+
+1. Open **Explore** (`Ctrl+E`).
+2. **MangaDex** is enabled by default; press **Check** to see whether it answers (latency is shown).
+   Use **Pin** to keep a source at the top and **Mirror** to point MangaDex at another API base.
+3. Type a term and press **Search** (or **Popular now** to browse). Failures are shown per source,
+   under the results, instead of hiding the results of the sources that worked.
+4. Click a result to add it to the library and open its details; **Refresh chapters** fetches the
+   current chapter list without losing read/offline flags.
+5. Reading works like local content. Pages are cached as you read; **Download** stores a CBZ under
+   `downloads/` so the chapter opens with no network.
+
+For your own server, **Add OPDS catalogue…** accepts the catalogue URL, e.g. Komga's
+`http://localhost:25600/opds/v1.2/catalog`. Only CBZ/ZIP chapters are offered (EPUB/PDF are skipped
+because this build cannot render them).
 
 Import layouts that are understood (details in [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)):
 
@@ -96,12 +119,18 @@ Folder\One.cbz, Folder\Two.cbz              -> two titles
 * Offline copies of chapters as CBZ under the application data folder.
 * **Backup export/import in the Android Kotatsu format** (favourites, categories, history, bookmarks,
   settings, sources) plus merging rules that never delete local data.
+* **Online sources**: MangaDex (search, filters, details, chapters, pages, downloads, mirror
+  failover) and OPDS catalogues; Hub with enable/disable, pinning, availability checks, per-source
+  error messages and a "load more" page step.
 * Light/dark theme, English and **Brazilian Portuguese** UI.
-* `--smoke-test` self check and a 78-case test suite.
+* `--smoke-test` self check (22 checks) and a 112-case test suite, including the source layer against
+  a local HTTP server (no internet needed).
 
-Not implemented yet (and not claimed): online manga sources, cross-device sync, tracking services,
-statistics screen, bookmarks UI, WebP/AVIF pages, incognito mode, app lock. The full, honest
-breakdown is in [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md).
+Not implemented yet (and not claimed): the ~900 Android parsers (the Hub explains why for each
+listed source), cross-device sync, tracking services, statistics screen, bookmarks UI, WebP/AVIF
+pages, incognito mode, app lock. The full, honest breakdown is in
+[`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md); the source-by-source detail is in
+[`docs/SOURCES.md`](docs/SOURCES.md).
 
 ## 4. Build it yourself
 
@@ -145,7 +174,7 @@ desktop/                                                    the Windows desktop 
   src/test/kotlin/org/koitharu/kotatsu/desktop/test/…       dependency-free test suite
   resources/icon.ico, icon.png, tools/make_icon.py
 scripts/                                                    offline build + packaging scripts
-docs/                                                       architecture, matrix, guides
+docs/                                                       architecture, sources, matrix, guides
 .github/workflows/build-windows.yml                         Windows CI (build, test, package, release)
 ```
 
@@ -161,8 +190,9 @@ Everything here is distributed under the **GNU General Public License v3.0** —
 If you redistribute the application you must keep it under the GPL, keep the credits above, and make
 the corresponding source available.
 
-The application ships **no content**. It only opens files that the user already has on disk; it does
-not bypass DRM or any third-party protection, and it does not include copyrighted material.
+The application ships **no content** and no scraping bypass. It opens files that the user already has
+on disk and talks to public, documented endpoints (MangaDex API, OPDS catalogues). It does not bypass
+DRM, paywalls, logins or Cloudflare challenges, and it does not include copyrighted material.
 
 ---
 
@@ -171,6 +201,12 @@ not bypass DRM or any third-party protection, and it does not include copyrighte
 **Kotatsu Lunar** é uma versão **não oficial** para desktop (Windows 10/11, 64 bits) do
 [Kotatsu-Redo](https://github.com/Kotatsu-Redo/Kotatsu-Redo). Não é afiliada nem endossada pelos
 mantenedores originais. Interface traduzida para português do Brasil.
+
+Ele lê seus arquivos locais (CBZ/ZIP e pastas de imagens) **e também títulos online** de duas fontes
+reais: **MangaDex** (API pública) e **catálogos OPDS** (Komga, Kavita, servidor próprio). A tela
+**Explorar** é o Hub: ativar/fixar fontes, testar disponibilidade, pesquisar, filtrar, abrir detalhes,
+ler e baixar capítulos. As outras ~900 fontes do app Android aparecem listadas como indisponíveis,
+**com o motivo** — nada é simulado.
 
 ### Instalar e abrir
 
@@ -188,18 +224,40 @@ mantenedores originais. Interface traduzida para português do Brasil.
 * Modos de leitura: padrão, da direita para a esquerda, vertical e Webtoon (`M` alterna).
 * Zoom: `+`/`-`/`0`, `Ctrl` + roda do mouse; `W` ajusta à largura, `H` à altura.
 * Sumário: `T`. Próximo/anterior capítulo: `N`/`P`. Salvar página: `S`. Tela cheia: `F11`.
-* Capítulos podem ser copiados para uso offline (arquivo CBZ em `%APPDATA%\KotatsuLunar\downloads`).
+* **Explorar** (`Ctrl+E`): MangaDex já vem ativada; use **Testar** para ver se responde, **Fixar**
+  para manter no topo e **Espelho** para trocar a URL base. Pesquise por título ou use **Populares
+  agora**. Clique num resultado para adicionar à biblioteca e abrir os detalhes; **Atualizar
+  capítulos** busca a lista atual sem perder o que já foi lido/baixado.
+* Para o seu servidor, use **Adicionar catálogo OPDS…** com a URL do catálogo (Komga:
+  `http://localhost:25600/opds/v1.2/catalog`). Só capítulos CBZ/ZIP são oferecidos — EPUB/PDF são
+  ignorados porque esta versão não os renderiza.
+* Capítulos podem ser copiados para uso offline (arquivo CBZ em `%APPDATA%\KotatsuLunar\downloads`),
+  inclusive os que vêm da internet.
 * **Backup Android**: no celular, *Configurações → Backup*; no PC, **Arquivo → Restaurar backup…**.
   A importação nunca apaga dados locais e mostra um relatório.
 
+### O que funciona nas fontes online
+
+* **MangaDex**: busca por título, interruptor de conteúdo adulto, filtro por tags, capítulos em
+  inglês e português, lista de capítulos com volume/número/grupo, páginas, capas, downloads e troca
+  de espelho com fallback automático.
+* **OPDS**: catálogo do usuário, navegação biblioteca → série, busca OpenSearch, capítulos em
+  CBZ/ZIP, download e leitura offline.
+* Mensagens de erro específicas para: sem rede, tempo esgotado, HTTP 4xx/5xx, limite de requisições
+  (429, respeitando `Retry-After`), título/capítulo não encontrado, resposta inválida e fonte
+  indisponível.
+
 ### O que ainda não existe
 
-Fontes online de mangá, sincronização entre dispositivos, serviços de track (AniList/MAL), tela de
-estatísticas, interface de marcadores e páginas em WebP/AVIF. A lista completa e honesta está em
-[`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md).
+As ~900 fontes do app Android (o pacote de parsers não é incluído; cada uma aparece no Hub com o
+motivo), sincronização entre dispositivos, serviços de track (AniList/MAL), tela de estatísticas,
+interface de marcadores, páginas em WebP/AVIF e resolução de desafios Cloudflare/JavaScript. A lista
+completa e honesta está em [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) e o detalhamento por
+fonte em [`docs/SOURCES.md`](docs/SOURCES.md).
 
 ### Dados e licença
 
-Dados em `%APPDATA%\KotatsuLunar`; cache em `%LOCALAPPDATA%\KotatsuLunar\cache`; logs em
-`%APPDATA%\KotatsuLunar\logs`. Código sob **GPL-3.0** — mantenha esta licença e os créditos
+Dados em `%APPDATA%\KotatsuLunar` (biblioteca, histórico, configurações e `sources.json` com as
+fontes ativas); cache em `%LOCALAPPDATA%\KotatsuLunar\cache` (capas e páginas online, pode ser
+apagado); logs em `%APPDATA%\KotatsuLunar\logs`. Código sob **GPL-3.0** — mantenha esta licença e os créditos
 ([`NOTICE.md`](NOTICE.md)) em qualquer redistribuição.

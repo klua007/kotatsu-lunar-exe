@@ -23,8 +23,8 @@ Result:
 | --- | --- | --- |
 | jar | `build\dist\kotatsu-lunar.jar` | runnable with `java -jar` |
 | app image | `build\package\KotatsuLunar\KotatsuLunar.exe` | native launcher + bundled runtime |
-| portable zip | `build\dist\KotatsuLunar-0.1.0-windows-x64-portable.zip` | unzip and run, no install |
-| MSI | `build\dist\KotatsuLunar-0.1.0.msi` | installer (needs the WiX toolset) |
+| portable zip | `build\dist\KotatsuLunar-0.2.0-windows-x64-portable.zip` | unzip and run, no install |
+| MSI | `build\dist\KotatsuLunar-0.2.0.msi` | installer (needs the WiX toolset) |
 
 The script fails if the jar or the launcher cannot run `--version` and `--smoke-test`, so a broken
 package can never be uploaded.
@@ -70,7 +70,9 @@ on plugin resolution.
 
 ## 4. Tests
 
-The suite is a plain Kotlin program (no JUnit), 78 checks:
+The suite is a plain Kotlin program (no JUnit), 112 checks. Everything that would need the internet
+runs against a local `com.sun.net.httpserver` instance (`desktop/src/test/.../FakeServer.kt`), so the
+suite is reproducible offline and in CI:
 
 ```bash
 java -Dkotatsu.test=1 -Djava.awt.headless=true \
@@ -93,7 +95,10 @@ Coverage:
 | Stores | persistence, defaults on corruption (file kept as `.corrupt-*`), merge rules |
 | Backup | section list, JSON array wrapping, round-trip, **Android-shaped fixture**, idempotency, merge safety |
 | Reader geometry | fit width/height, zoom clamping, pan clamping, continuous scale |
-| UI panels | every main panel is constructed and painted off-screen (headless) without errors |
+| UI panels | every main panel (library, hub, details, history, downloads, settings) is constructed and painted off-screen (headless) without errors |
+| Online sources | MangaDex and OPDS protocol parsing, page/cover URLs, chapter lists, image download and caching, CBZ downloads, archive rejection, mirror failover, availability checks |
+| Network failures | offline host, timeout, 404, 429 + `Retry-After`, 5xx, invalid JSON/XML, empty feed — each mapped to a distinct message |
+| Source state | enable/pin/mirror persistence in `sources.json`, OPDS catalogue add/dedupe/remove, backup round trip, "a failing source never touches local data" |
 
 If you add a feature, add a case to the matching suite; `desktopTests` is part of `check`.
 
@@ -101,7 +106,7 @@ If you add a feature, add a case to the matching suite; `desktopTests` is part o
 
 ```powershell
 .\KotatsuLunar.exe --version
-.\KotatsuLunar.exe --smoke-test        # 17 checks, exit code 0
+.\KotatsuLunar.exe --smoke-test        # 22 checks, exit code 0
 .\KotatsuLunar.exe --data-dir
 .\KotatsuLunar.exe --import "C:\manga\One Piece\"
 ```
@@ -111,12 +116,17 @@ zoom, press `T`/`N`/`S`, close and reopen to confirm the position was kept, togg
 History and Downloads, export a backup, and restore it into a second profile with
 `KOTATSU_LUNAR_HOME` pointing elsewhere.
 
+Online flow (needs internet on that machine — the automated tests cover it with a local server):
+open **Explore**, **Check** MangaDex, search, open a result, read two pages, go back and verify the
+page cache was used, **Download** a chapter, turn the network off and reopen it, then add an OPDS
+catalogue of your own server and repeat.
+
 ## 6. CI
 
 `.github/workflows/build-windows.yml` runs on `windows-latest` for every push, pull request and tag:
 
 1. JDK 17 (Temurin) + WiX toolset;
 2. Kotlin compiler 2.1.21 downloaded from the official release;
-3. `scripts/build-windows.ps1` → compile, test suite, jar, app image, portable zip, MSI;
+3. `scripts/build-windows.ps1` → compile, test suite (112 checks, offline), jar, app image, portable zip, MSI;
 4. verifies the packaged `KotatsuLunar.exe` with `--version` and `--smoke-test`;
 5. uploads the portable zip, the jar and the MSI as artifacts (and to the release for `v*` tags).

@@ -38,7 +38,8 @@ inside the nested `manga` object — exactly what the Android importer reads.
 | Bookmarks | yes | Stored and exported; there is no dedicated UI yet. |
 | Reader settings | yes | Reading mode, theme, page gap, preload, etc. |
 | Unrelated Android preferences | preserved | Copied verbatim into `settings.json` (never interpreted, never lost). |
-| Titles from online sources | metadata only | Stored so the backup round-trips; the desktop build cannot open them (no source layer). The UI states this. |
+| Titles from online sources | yes, when the source exists here | MangaDex and OPDS titles can be opened and read. Titles from sources this build cannot run (the Android parser pack) are kept as metadata so the backup round-trips, and the UI says they cannot be opened. |
+| Source settings (enabled, pinned, OPDS catalogues) | yes | Restored into `sources.json`; a source that is not available on the PC keeps its flags for a future version. |
 | Downloaded chapters (CBZ files) | **no** | They live in the phone's private storage (`/data/…/downloads` or SD card) and are not part of the backup ZIP. Copy the CBZ files manually to `%APPDATA%\KotatsuLunar\downloads\<mangaId>\<chapterId>.cbz` if you need them, or re-download from the source file on the PC. |
 | Tracking accounts, sync key, statistics, saved filters | preserved only | Kept verbatim for a future version; nothing is sent anywhere. |
 | App password / proxy credentials / incognito flag | **never imported** | Explicitly excluded, matching upstream, which strips them from its own dumps. |
