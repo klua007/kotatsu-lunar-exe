@@ -99,7 +99,7 @@ if (-not $SkipTests) {
     & $Kotlinc -jvm-target 17 -nowarn "-Xfriend-paths=$MainOut" -classpath $MainOut -d $TestOut $TestSources
     if ($LASTEXITCODE -ne 0) { Fail "test compilation failed" }
     Write-Host "-- running tests"
-    & $Java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "$MainOut;$TestOut;$StdLib" $TestClass
+    & $Java "-Dkotatsu.test=1" "-Djava.awt.headless=true" -cp "$MainOut;$TestOut;$StdLib" $TestClass
     if ($LASTEXITCODE -ne 0) { Fail "tests failed" }
 }
 

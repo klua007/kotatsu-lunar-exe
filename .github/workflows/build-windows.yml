@@ -86,7 +86,7 @@ jobs:
               Tee-Object -FilePath build\test-compile.log
             if ($LASTEXITCODE -ne 0) { throw "test compilation failed with exit code $LASTEXITCODE" }
 
-            & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "$main;$test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
+            & java "-Dkotatsu.test=1" "-Djava.awt.headless=true" -cp "$main;$test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
               Tee-Object -FilePath build\test-output.log
             if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE" }
           }
