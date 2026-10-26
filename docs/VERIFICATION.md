@@ -45,33 +45,45 @@ Additional checks:
 | UI panels headless paint (library, details, history, downloads, settings) | passed (off-screen rendering) |
 | Reader window | **not** executed here: the container is headless (no X server), so `MainWindow`, the reader canvases and the menus were only compiled and code-reviewed, never displayed |
 
-## 2. Windows verification
+## 2. Windows verification (executed)
 
-The workflow `.github/workflows/build-windows.yml` runs on `windows-latest` and
+The workflow `.github/workflows/build-windows.yml` runs on `windows-latest`. It has been executed on
+this repository and **passes**:
 
-1. compiles with the official Kotlin compiler on Windows,
-2. runs the same 78 tests,
-3. builds the jar and the `jpackage` app image (`KotatsuLunar.exe`) with a trimmed Java runtime,
-4. **executes the packaged `.exe`** with `--version` and `--smoke-test` (headless), failing the build
-   if either exits non-zero,
-5. uploads the portable zip, the jar and the MSI (when WiX produced it).
+| Step | Result |
+| --- | --- |
+| Compile desktop sources (Kotlin 2.1.21, JDK 17 Temurin) | passed |
+| Run test suite (`TestSuiteKt`, 78 checks) | passed |
+| Build runnable jar | passed |
+| Smoke test the jar (`java -jar … --version`, `--smoke-test`) | passed |
+| Package native application (`jpackage` app-image, WiX installed) | passed |
+| **Verify the produced `.exe`** (`KotatsuLunar.exe --version` and `--smoke-test`, exit code checked) | passed |
+| Build portable `.zip` and `.msi` | passed |
+| Upload artifacts | `kotatsu-lunar-windows-x64-portable` (48 MB), `kotatsu-lunar-jar` (1 MB), `kotatsu-lunar-windows-x64-msi` (48 MB) |
 
-That is the authoritative Windows verification; it has to be read from the workflow run of this
-repository (Actions → *Build Windows desktop app*). No Windows machine was available inside this
-session, therefore the *interactive* GUI on Windows (window rendering, DPI scaling, drag and drop
-from Explorer) remains to be confirmed by that run and by a human.
+So, on Windows: the application **compiles, its tests pass, the packaged `KotatsuLunar.exe` starts,
+prints the version and completes the 17-check end-to-end smoke test** (create CBZ → import → read
+pages → save progress → offline copy → backup export/import) — all verified by the workflow, which
+fails if any of those steps returns a non-zero exit code.
+
+What the workflow cannot check automatically, and therefore still needs a human on a Windows desktop:
+
+* the interactive GUI: window sizing/DPI, cover grid wrapping, double-click behaviour, drag and drop
+  from Explorer, mouse panning in the reader, font rendering;
+* the `.msi` installation flow (install, Start-menu shortcut, uninstall);
+* behaviour with real content in exotic layouts (nested folders, very large archives).
 
 ## 3. Known gaps and risks
 
-* The GUI has never been *displayed* in this session (headless container). Every main panel is
+* The GUI has never been *displayed* in this session (headless container) nor by CI. Every main panel is
   constructed and painted off-screen by `UiTests`, and the reader geometry is unit-tested, but
   nothing was rendered on a real screen: visual defects are possible. The first Windows run should
   check window sizing/DPI, cover grid wrapping, reader zoom/pan and drag and drop from Explorer.
 * `jpackage` requires a JDK on the build machine; the offline `scripts/build.sh` path only produces
   the jar because `jpackage` is not in the JRE used here. On Windows (CI) the `.exe` and `.msi` are
-  produced by `scripts/build-windows.ps1`.
-* The MSI needs the WiX 3.x toolset; if `choco install wixtoolset` fails in CI, the portable zip is
-  still produced (the step is `continue-on-error` and the packaging script warns).
+  produced from the same sources.
+* The MSI needs the WiX 3.x toolset; CI installs it with Chocolatey (`continue-on-error`, so a failure
+  only drops the MSI, never the portable package).
 * WebP/AVIF/JXL pages are not decoded.
 * Online sources, sync and tracking are not implemented (see `FEATURE_MATRIX.md`).
 * The Android app itself was not rebuilt in this session (no Android SDK, no Maven access): `app/` is
