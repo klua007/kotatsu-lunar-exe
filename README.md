@@ -23,10 +23,15 @@ copies, reading history and progress, and import/export of **Android Kotatsu bac
 
 ## 1. Install and run
 
+**Downloads:** [Releases](https://github.com/klua007/kotatsu-lunar-exe/releases) —
+`KotatsuLunar-0.1.0-windows-x64-portable.zip`, `KotatsuLunar-0.1.0.msi` and `kotatsu-lunar.jar`
+built and smoke-tested on a Windows runner by
+[this workflow](https://github.com/klua007/kotatsu-lunar-exe/actions/workflows/build-windows.yml).
+
 ### Option A — portable (no installation)
 
-1. Download `KotatsuLunar-<version>-windows-x64-portable.zip` (from the GitHub **Actions** artifacts
-   or a **Release**).
+1. Download `KotatsuLunar-<version>-windows-x64-portable.zip` (from the GitHub **Releases** page or
+   the **Actions** artifacts).
 2. Unzip it anywhere (for example `C:\Users\<you>\Apps\KotatsuLunar`).
 3. Run **`KotatsuLunar.exe`**.
 
