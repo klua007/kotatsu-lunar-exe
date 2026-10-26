@@ -9,6 +9,9 @@ interface Navigator {
 
 	fun showLibrary()
 
+	/** Opens the online-source Hub (explore/search). */
+	fun showHub()
+
 	fun showHistory()
 
 	fun showDownloads()

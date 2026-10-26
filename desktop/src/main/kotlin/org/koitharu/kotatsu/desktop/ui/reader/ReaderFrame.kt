@@ -13,6 +13,7 @@ import org.koitharu.kotatsu.desktop.data.AppRepository
 import org.koitharu.kotatsu.desktop.data.local.ChapterContent
 import org.koitharu.kotatsu.desktop.data.local.ImageDecoder
 import org.koitharu.kotatsu.desktop.data.local.PageImageCache
+import org.koitharu.kotatsu.desktop.data.local.PageLoad
 import org.koitharu.kotatsu.desktop.data.model.Chapter
 import org.koitharu.kotatsu.desktop.data.model.MangaWithChapters
 import org.koitharu.kotatsu.desktop.data.model.ReaderMode
@@ -80,7 +81,10 @@ class ReaderFrame internal constructor(
 	private var fitToWidth = true
 	private val images = HashMap<Int, BufferedImage?>()
 	private val loading = HashSet<Int>()
+	private val pageErrors = HashMap<Int, String>()
 	private var content: ChapterContent = ChapterContent.EMPTY
+	/** Non-null when the whole chapter could not be opened (e.g. the source is offline). */
+	private var contentError: String? = null
 
 	private val titleLabel = JLabel("").apply { font = Theme.fontH2; foreground = Theme.onBackground }
 	private val pageLabel = JLabel("").apply { font = Theme.fontSmall; foreground = Theme.onSurfaceVariant }
@@ -324,6 +328,8 @@ class ReaderFrame internal constructor(
 		generation++
 		images.clear()
 		loading.clear()
+		pageErrors.clear()
+		contentError = null
 		page = startPage.coerceAtLeast(0)
 		panOffset = Point(0, 0)
 		val chapter = currentChapter() ?: return
@@ -332,9 +338,18 @@ class ReaderFrame internal constructor(
 		chapterList.selectedIndex = chapterIndex
 		chapterList.ensureIndexIsVisible(chapterIndex)
 		val gen = generation
-		Async.compute({ repo.chapterContent(chapter) }) { loaded ->
+		Async.compute({ repo.chapterContentResult(chapter) }) { outcome ->
 			if (gen != generation) return@compute
-			content = loaded
+			if (outcome is org.koitharu.kotatsu.desktop.sources.SourceOutcome.Failure) {
+				content = ChapterContent.EMPTY
+				contentError = outcome.failure.message()
+				statusLabel.text = contentError
+				Log.w(TAG, "Chapter ${chapter.chapterId} failed: ${outcome.failure.kind}")
+				updateContentPane()
+				repaintCanvas()
+				return@compute
+			}
+			content = (outcome as org.koitharu.kotatsu.desktop.sources.SourceOutcome.Success).value
 			if (content.pageCount == 0) {
 				statusLabel.text = "${tr(K.READER_NO_PAGES)} — ${chapter.url}"
 			} else {
@@ -364,12 +379,26 @@ class ReaderFrame internal constructor(
 		if (!loading.add(index)) return
 		val gen = generation
 		val chapter = currentChapter() ?: return
-		Async.compute({ PageImageCache.load(chapter.chapterId, index, content) }) { image ->
+		Async.compute({ PageImageCache.loadDetailed(chapter.chapterId, index, content) }) { loaded ->
 			if (gen != generation) return@compute
 			loading.remove(index)
-			images[index] = image
-			if (image == null) {
-				Log.w(TAG, "Page $index of chapter ${chapter.chapterId} could not be decoded")
+			when (loaded) {
+				is PageLoad.Ok -> {
+					images[index] = loaded.image
+					pageErrors.remove(index)
+				}
+
+				PageLoad.Missing -> {
+					images[index] = null
+					pageErrors[index] = tr(K.READER_ERROR_NETWORK)
+					Log.w(TAG, "Page $index of chapter ${chapter.chapterId} could not be loaded")
+				}
+
+				PageLoad.Undecodable -> {
+					images[index] = null
+					pageErrors[index] = tr(K.READER_ERROR_DECODE)
+					Log.w(TAG, "Page $index of chapter ${chapter.chapterId} is not a supported image format")
+				}
 			}
 			repaintCanvas()
 		}
@@ -602,6 +631,10 @@ class ReaderFrame internal constructor(
 			val g2 = g.create() as Graphics2D
 			try {
 				g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+				contentError?.let { message ->
+					drawCenteredMessage(g2, shorten(message))
+					return
+				}
 				if (content.pageCount == 0) {
 					drawCenteredMessage(g2, tr(K.READER_NO_PAGES))
 					return
@@ -609,7 +642,7 @@ class ReaderFrame internal constructor(
 				val image = images[page]
 				if (image == null) {
 					requestPage(page)
-					drawCenteredMessage(g2, tr(K.READER_LOADING))
+					drawCenteredMessage(g2, pageErrors[page] ?: tr(K.READER_LOADING))
 					return
 				}
 				val placement = PageLayout.place(
@@ -695,7 +728,13 @@ class ReaderFrame internal constructor(
 						g2.color = Theme.surfaceVariant
 						g2.fillRect(0, top, viewWidth, height)
 						g2.color = Theme.onSurfaceVariant
-						g2.drawString("…", viewWidth / 2, top + height / 2)
+						g2.font = Theme.fontSmall
+						val placeholder = pageErrors[index] ?: "…"
+						g2.drawString(
+							shorten(placeholder),
+							(viewWidth - g2.fontMetrics.stringWidth(shorten(placeholder))) / 2,
+							top + height / 2,
+						)
 						return@forEachIndexed
 					}
 					val drawWidth = (viewWidth * zoom).toInt()
@@ -707,6 +746,10 @@ class ReaderFrame internal constructor(
 			}
 		}
 	}
+
+	/** Keeps a long error message inside the page area. */
+	private fun shorten(message: String): String =
+		if (message.length <= 70) message else message.take(67) + "…"
 
 	private fun drawCenteredMessage(g2: Graphics2D, message: String) {
 		g2.color = Theme.onSurfaceVariant
@@ -776,6 +819,10 @@ class ReaderFrame internal constructor(
 				else -> Theme.background
 			}
 			label.foreground = if (isSelected) Color.WHITE else Theme.onBackground
+			// A JPanel renderer is not laid out by JList: do it here or the label stays invisible.
+			val width = list?.width ?: 0
+			if (width > 0) setSize(width, preferredSize.height)
+			Ui.layoutTree(this)
 			return this
 		}
 	}

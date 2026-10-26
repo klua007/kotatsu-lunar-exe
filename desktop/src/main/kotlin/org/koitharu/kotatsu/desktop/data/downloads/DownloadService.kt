@@ -45,6 +45,10 @@ class DownloadService(private val library: LibraryStore) {
 
 	fun isDownloaded(chapter: Chapter): Boolean = offlineFile(chapter) != null
 
+	/** Where the offline copy of [chapter] lives (created by the online downloader as well). */
+	fun chapterTarget(chapter: Chapter): Path =
+		chapterDirectory(chapter.mangaId).resolve("${chapter.chapterId}.cbz")
+
 	/**
 	 * Creates the offline copy of a chapter.
 	 *

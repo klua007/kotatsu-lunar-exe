@@ -154,6 +154,10 @@ class LibraryPanel(
 		add(Ui.label(tr(K.LIBRARY_EMPTY), Theme.fontH1, Theme.onSurfaceVariant).apply { alignmentX = CENTER_ALIGNMENT })
 		add(Ui.vgap(8))
 		add(Ui.label(tr(K.LIBRARY_EMPTY_HINT), Theme.baseFont, Theme.onSurfaceVariant).apply { alignmentX = CENTER_ALIGNMENT })
+		add(Ui.vgap(12))
+		add(
+			Ui.accentButton(tr(K.NAV_HUB)) { navigator.showHub() }.apply { alignmentX = CENTER_ALIGNMENT },
+		)
 	}
 
 	private fun installKeys() {
@@ -293,7 +297,8 @@ class LibraryPanel(
 				append("<html><b>").append(item.manga.displayTitle).append("</b>")
 				append("<br>").append(tr(K.LIBRARY_CHAPTERS)).append(": ").append(item.chaptersCount)
 				append("<br>").append(tr(K.DETAILS_PROGRESS)).append(": ").append(formatPercent(item.progress))
-				append("<br>").append(tr(K.LIBRARY_SOURCE)).append(": LOCAL")
+				append("<br>").append(tr(K.LIBRARY_SOURCE)).append(": ")
+				append(repo.sourceFor(item.manga)?.descriptor?.title ?: item.manga.source)
 				item.manga.authors?.let { append("<br>").append(it) }
 				append("</html>")
 			}

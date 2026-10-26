@@ -15,6 +15,7 @@ fun main() {
 	StorageTests.run()
 	BackupTests.run()
 	UiTests.run()
+	SourceTests.run()
 	val exitCode = TestRunner.finish()
 	Fixtures.cleanup()
 	kotlin.system.exitProcess(exitCode)

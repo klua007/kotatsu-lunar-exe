@@ -12,6 +12,7 @@ import org.koitharu.kotatsu.desktop.data.model.ReaderMode
 import org.koitharu.kotatsu.desktop.data.store.ActivityStore
 import org.koitharu.kotatsu.desktop.data.store.LibraryStore
 import org.koitharu.kotatsu.desktop.data.store.SettingsStore
+import org.koitharu.kotatsu.desktop.data.store.SourcesStore
 import org.koitharu.kotatsu.desktop.reader.ReadingProgress
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -72,6 +73,28 @@ object SmokeTest {
 			check("favourite toggled on", repo.toggleFavourite(manga.id))
 			repo.settings.defaultReaderMode = ReaderMode.WEBTOON
 			repo.flush()
+
+			// Online sources: catalogue, state persistence and page cache location (no network here)
+			val catalog = repo.sourceCatalog()
+			check("source catalogue lists MangaDex", catalog.any { it.descriptor.id == "MANGADEX" && it.isAvailable })
+			check(
+				"unavailable sources carry a reason",
+				catalog.filter { !it.isAvailable }.all { it.descriptor.unavailableReason != null },
+			)
+			check("MangaDex is enabled by default", repo.registry.isEnabled(
+				catalog.first { it.descriptor.id == "MANGADEX" }.descriptor,
+			))
+			repo.registry.setPinned("MANGADEX", true)
+			repo.flush()
+			val reloadedSources = SourcesStore(
+				Paths.get(System.getProperty("kotatsu.home")).resolve("sources.json"),
+			)
+			reloadedSources.load()
+			check("source state persisted", reloadedSources.stateOf("MANGADEX")?.pinned == true)
+			check("page cache directory available", Files.isDirectory(
+				Paths.get(System.getProperty("kotatsu.home")).resolve("cache").resolve("remote"),
+			) || Files.isDirectory(org.koitharu.kotatsu.desktop.core.AppDirs.cacheDir),
+			)
 
 			// Backup round trip
 			val backup = repo.exportBackup(root.resolve("backup.zip"))

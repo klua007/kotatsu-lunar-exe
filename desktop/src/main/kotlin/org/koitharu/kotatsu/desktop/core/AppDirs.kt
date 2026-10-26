@@ -32,19 +32,24 @@ object AppDirs {
 
 	private const val APP_DIR_NAME = "KotatsuLunar"
 
-	val dataDir: Path by lazy { resolveDataDir() }
+	/**
+	 * Resolved on every access instead of once: the tests switch `kotatsu.home` between cases, and a
+	 * cached value silently pointed them at the real user profile (which made tests share downloads
+	 * and page caches). The resolution is a few string operations, so this costs nothing.
+	 */
+	val dataDir: Path get() = resolveDataDir()
 
-	val cacheDir: Path by lazy { resolveCacheDir() }
+	val cacheDir: Path get() = resolveCacheDir()
 
-	val downloadsDir: Path by lazy { dataDir.resolve("downloads") }
+	val downloadsDir: Path get() = dataDir.resolve("downloads")
 
-	val backupsDir: Path by lazy { dataDir.resolve("backups") }
+	val backupsDir: Path get() = dataDir.resolve("backups")
 
-	val logsDir: Path by lazy { dataDir.resolve("logs") }
+	val logsDir: Path get() = dataDir.resolve("logs")
 
-	val coversCacheDir: Path by lazy { cacheDir.resolve("covers") }
+	val coversCacheDir: Path get() = cacheDir.resolve("covers")
 
-	val pagesCacheDir: Path by lazy { cacheDir.resolve("pages") }
+	val pagesCacheDir: Path get() = cacheDir.resolve("pages")
 
 	fun ensureCreated() {
 		listOf(dataDir, cacheDir, downloadsDir, backupsDir, logsDir, coversCacheDir, pagesCacheDir)

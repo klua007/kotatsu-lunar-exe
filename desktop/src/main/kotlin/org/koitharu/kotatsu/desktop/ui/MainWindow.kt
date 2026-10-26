@@ -17,6 +17,7 @@ import org.koitharu.kotatsu.desktop.ui.details.DetailsPanel
 import org.koitharu.kotatsu.desktop.ui.dialogs.BackupDialog
 import org.koitharu.kotatsu.desktop.ui.downloads.DownloadsPanel
 import org.koitharu.kotatsu.desktop.ui.history.HistoryPanel
+import org.koitharu.kotatsu.desktop.ui.hub.HubPanel
 import org.koitharu.kotatsu.desktop.ui.library.LibraryPanel
 import org.koitharu.kotatsu.desktop.ui.reader.openReaderWindow
 import org.koitharu.kotatsu.desktop.ui.settings.SettingsPanel
@@ -56,6 +57,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 
 	private enum class Route(val card: String) {
 		LIBRARY("library"),
+		HUB("hub"),
 		HISTORY("history"),
 		DOWNLOADS("downloads"),
 		SETTINGS("settings"),
@@ -74,6 +76,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 	}
 
 	private val libraryPanel = LibraryPanel(repo, this)
+	private val hubPanel = HubPanel(repo, this)
 	private val historyPanel = HistoryPanel(repo, this)
 	private val downloadsPanel = DownloadsPanel(repo, this)
 	private val settingsPanel = SettingsPanel(repo, this)
@@ -147,6 +150,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 			},
 		)
 		add(navButton(Route.LIBRARY, K.NAV_LIBRARY))
+		add(navButton(Route.HUB, K.NAV_HUB))
 		add(navButton(Route.HISTORY, K.NAV_HISTORY))
 		add(navButton(Route.DOWNLOADS, K.NAV_DOWNLOADS))
 		add(Box.createVerticalStrut(8))
@@ -175,6 +179,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		addActionListener {
 			when (route) {
 				Route.LIBRARY -> showLibrary()
+				Route.HUB -> showHub()
 				Route.HISTORY -> showHistory()
 				Route.DOWNLOADS -> showDownloads()
 				Route.SETTINGS -> showSettings()
@@ -197,6 +202,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		background = Theme.background
 		add(content, BorderLayout.CENTER)
 		content.add(libraryPanel, Route.LIBRARY.card)
+		content.add(hubPanel, Route.HUB.card)
 		content.add(historyPanel, Route.HISTORY.card)
 		content.add(downloadsPanel, Route.DOWNLOADS.card)
 		content.add(settingsPanel, Route.SETTINGS.card)
@@ -229,6 +235,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		add(
 			JMenu(tr(K.MENU_VIEW)).apply {
 				add(menuItem(K.NAV_LIBRARY, KeyEvent.VK_1, KeyEvent.ALT_DOWN_MASK) { showLibrary() })
+				add(menuItem(K.NAV_HUB, KeyEvent.VK_5, KeyEvent.ALT_DOWN_MASK) { showHub() })
 				add(menuItem(K.NAV_HISTORY, KeyEvent.VK_2, KeyEvent.ALT_DOWN_MASK) { showHistory() })
 				add(menuItem(K.NAV_DOWNLOADS, KeyEvent.VK_3, KeyEvent.ALT_DOWN_MASK) { showDownloads() })
 				add(menuItem(K.NAV_SETTINGS, KeyEvent.VK_4, KeyEvent.ALT_DOWN_MASK) { showSettings() })
@@ -287,6 +294,10 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 			if (currentRoute != Route.LIBRARY) showLibrary()
 			libraryPanel.focusSearch()
 		}
+		Ui.registerShortcut(rootPane, KeyEvent.VK_E, KeyEvent.CTRL_DOWN_MASK) {
+			showHub()
+			hubPanel.focusSearch()
+		}
 	}
 
 	private fun installDropTarget() {
@@ -309,6 +320,11 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 	override fun showLibrary() {
 		showRoute(Route.LIBRARY)
 		libraryPanel.onShown()
+	}
+
+	override fun showHub() {
+		showRoute(Route.HUB)
+		hubPanel.onShown()
 	}
 
 	override fun showHistory() {

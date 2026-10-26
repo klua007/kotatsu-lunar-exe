@@ -132,6 +132,20 @@ class WrapLayout(
 
 object Ui {
 
+	/**
+	 * Lays out a component and its whole subtree.
+	 *
+	 * List cell renderers are painted by `CellRendererPane` without being validated, and
+	 * `Container.doLayout()` is not recursive, so a renderer built from nested panels keeps zero
+	 * bounds for its children and paints an empty (or half empty) row. Call this from the renderer.
+	 */
+	fun layoutTree(component: Component) {
+		if (component is Container) {
+			component.doLayout()
+			component.components.forEach(::layoutTree)
+		}
+	}
+
 	fun panel(layout: LayoutManager? = null, background: java.awt.Color = Theme.background): JPanel =
 		JPanel(layout).apply { this.background = background }
 

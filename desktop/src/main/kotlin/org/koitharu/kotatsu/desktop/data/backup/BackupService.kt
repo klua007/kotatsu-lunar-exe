@@ -19,7 +19,9 @@ import org.koitharu.kotatsu.desktop.core.json.JsonValue
 import org.koitharu.kotatsu.desktop.core.json.add
 import org.koitharu.kotatsu.desktop.core.json.asIntOrNull
 import org.koitharu.kotatsu.desktop.core.json.asObj
+import org.koitharu.kotatsu.desktop.core.json.asBooleanOrNull
 import org.koitharu.kotatsu.desktop.core.json.asStringOrNull
+import org.koitharu.kotatsu.desktop.core.json.boolJson
 import org.koitharu.kotatsu.desktop.core.json.jsonArray
 import org.koitharu.kotatsu.desktop.core.json.jsonObject
 import org.koitharu.kotatsu.desktop.core.json.stringJson
@@ -35,6 +37,8 @@ import org.koitharu.kotatsu.desktop.data.model.toJson
 import org.koitharu.kotatsu.desktop.data.store.ActivityStore
 import org.koitharu.kotatsu.desktop.data.store.LibraryStore
 import org.koitharu.kotatsu.desktop.data.store.SettingsStore
+import org.koitharu.kotatsu.desktop.data.store.OpdsCatalog
+import org.koitharu.kotatsu.desktop.data.store.SourcesStore
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -69,6 +73,8 @@ class BackupService(
 	private val library: LibraryStore,
 	private val activity: ActivityStore,
 	private val settings: SettingsStore,
+	/** Optional so that the existing tests can keep constructing the service with three stores. */
+	private val sourcesStore: SourcesStore? = null,
 ) {
 
 	private companion object {
@@ -177,20 +183,7 @@ class BackupService(
 			BackupSection.SETTINGS,
 			jsonObject { settings.snapshot().forEach { (key, value) -> put(key, value) } },
 		)
-		writeJsonArray(
-			zip,
-			BackupSection.SOURCES,
-			listOf(
-				jsonObject {
-					put("source", stringJson(SOURCE_LOCAL))
-					put("sort_key", JsonValue.Number(0.0, "0"))
-					put("used_at", JsonValue.Number(System.currentTimeMillis().toDouble(), System.currentTimeMillis().toString()))
-					put("added_in", JsonValue.Number(1.0, "1"))
-					put("pinned", JsonValue.Bool(true))
-					put("enabled", JsonValue.Bool(true))
-				},
-			),
-		)
+		writeJsonArray(zip, BackupSection.SOURCES, sourceEntriesForBackup())
 	}
 
 	private fun writeJsonArray(zip: ZipOutputStream, section: BackupSection, items: List<JsonValue>) {
@@ -429,10 +422,56 @@ class BackupService(
 
 	private fun importSources(payload: String): BackupReport {
 		val items = parseItems(payload) ?: return BackupReport(invalid = 1)
-		// The desktop build has a single source; the upstream list is preserved for a future
-		// online-source implementation instead of being silently dropped.
+		// Enabled/pinned flags of sources this build knows are restored; the raw list is also kept
+		// in settings so that ids belonging to other builds (the ~900 Android parsers) survive a
+		// round trip instead of being dropped.
 		settings.putRaw("imported_sources", JsonValue.Str(payload))
-		return BackupReport(sources = items.size)
+		val store = sourcesStore ?: return BackupReport(sources = items.size)
+		var applied = 0
+		items.forEach { item ->
+			val obj = item.asObj() ?: return@forEach
+			val id = obj["source"].asStringOrNull()?.takeIf { it.isNotBlank() } ?: return@forEach
+			if (id == SOURCE_LOCAL) return@forEach
+			val enabled = obj["enabled"].asBooleanOrNull() ?: true
+			val pinned = obj["pinned"].asBooleanOrNull() ?: false
+			val url = obj["url"].asStringOrNull()?.takeIf { it.startsWith("http") }
+			if (url != null && id.startsWith("OPDS")) {
+				if (store.catalogs().none { it.id == id }) {
+					store.addCatalog(obj["title"].asStringOrNull() ?: id, url)
+				}
+			}
+			if (store.importState(id, enabled, pinned)) applied++
+		}
+		return BackupReport(sources = items.size, settingsApplied = applied)
+	}
+
+	/** Sources known to this build, plus the always-present local shelf. */
+	private fun sourceEntriesForBackup(): List<JsonValue> {
+		val now = System.currentTimeMillis()
+		val result = ArrayList<JsonValue>()
+		result += jsonObject {
+			put("source", stringJson(SOURCE_LOCAL))
+			put("sort_key", JsonValue.Number(0.0, "0"))
+			put("used_at", JsonValue.Number(now.toDouble(), now.toString()))
+			put("added_in", JsonValue.Number(1.0, "1"))
+			put("pinned", JsonValue.Bool(true))
+			put("enabled", JsonValue.Bool(true))
+		}
+		val states = sourcesStore?.allStates().orEmpty()
+		val catalogById = sourcesStore?.catalogs()?.associateBy(OpdsCatalog::id).orEmpty()
+		states.forEach { (id, state) ->
+			if (id == SOURCE_LOCAL) return@forEach
+			result += jsonObject {
+				put("source", stringJson(id))
+				put("enabled", boolJson(state.enabled))
+				put("pinned", JsonValue.Bool(state.pinned))
+				put("url", stringJson(catalogById[id]?.url))
+				put("title", stringJson(catalogById[id]?.title))
+				put("sort_key", JsonValue.Number(0.0, "0"))
+				put("added_in", JsonValue.Number(1.0, "1"))
+			}
+		}
+		return result
 	}
 
 	private fun preserveSection(report: BackupReport, section: BackupSection, payload: String): BackupReport {

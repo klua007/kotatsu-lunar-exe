@@ -146,6 +146,14 @@ class SettingsPanel(
 				},
 			)
 			add(Ui.button(tr(K.ACTION_REFRESH)) { refreshCacheLabel() })
+			add(
+				Ui.button(tr(K.SETTINGS_CLEAR_PAGE_CACHE)) {
+					Async.compute({ repo.clearPageCache() }) {
+						refreshCacheLabel()
+						Ui.showInfo(this@SettingsPanel, tr(K.SETTINGS_CLEAR_PAGE_CACHE))
+					}
+				},
+			)
 		}
 		content.add(storageButtons)
 		content.add(cacheLabel)
@@ -172,6 +180,12 @@ class SettingsPanel(
 		content.add(section(tr(K.SOURCES_TITLE)))
 		content.add(compatibilityLabel)
 		content.add(Ui.label(tr(K.SOURCES_UNAVAILABLE), Theme.fontSmall, Theme.onSurfaceVariant))
+		content.add(
+			JPanel(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
+				background = Theme.background
+				add(Ui.button(tr(K.NAV_HUB)) { navigator.showHub() })
+			},
+		)
 
 		// About
 		content.add(Ui.vgap(8))
@@ -241,16 +255,24 @@ class SettingsPanel(
 	override fun onShown() {
 		refreshCacheLabel()
 		compatibilityLabel.text = buildString {
+			val catalog = repo.sourceCatalog()
+			val implemented = catalog.count { it.isAvailable }
+			val enabled = catalog.count { it.enabled && it.isAvailable }
+			append(tr(K.SETTINGS_SOURCES_SUMMARY).format(implemented))
+			append(" · ")
+			append(tr(K.HUB_ENABLED_COUNT).format(enabled))
 			val unsupported = repo.unsupportedMangaCount()
-			append(tr(K.STATUS_ITEMS).format(unsupported))
-			append(" — ")
-			append("titles imported from Android online sources are preserved but cannot be opened in this build.")
+			if (unsupported > 0) {
+				append(" · ")
+				append(tr(K.SETTINGS_UNSUPPORTED_TITLES).format(unsupported))
+			}
 		}
 	}
 
 	private fun refreshCacheLabel() {
-		Async.compute({ cacheSize() }) { size ->
-			cacheLabel.text = tr(K.SETTINGS_CACHE_SIZE).format(humanFileSize(size))
+		Async.compute({ cacheSize() to repo.pageCacheSize() }) { (size, pages) ->
+			cacheLabel.text = tr(K.SETTINGS_CACHE_SIZE).format(humanFileSize(size)) +
+				" · " + tr(K.SETTINGS_PAGE_CACHE) + ": " + humanFileSize(pages)
 		}
 	}
 

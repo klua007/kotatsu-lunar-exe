@@ -136,7 +136,19 @@ class HistoryPanel(
 				g2.dispose()
 			}
 		}
+		override fun paintComponent(g: java.awt.Graphics) {
+			// The CellRendererPane paints this component without validating it first, so the
+			// children would keep the bounds from the previous (or zero) layout.
+			Ui.layoutTree(this)
+			super.paintComponent(g)
+		}
+
 		private var currentMangaId: Long? = null
+		private val textArea = JPanel().apply {
+			layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+			background = Theme.background
+			isOpaque = true
+		}
 		private val title = Ui.label("", Theme.baseFont.deriveFont(java.awt.Font.BOLD))
 		private val subtitle = Ui.label("", Theme.fontSmall, Theme.onSurfaceVariant)
 
@@ -145,15 +157,9 @@ class HistoryPanel(
 			border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
 			cover.preferredSize = Dimension(44, 60)
 			add(cover, BorderLayout.WEST)
-			add(
-				JPanel().apply {
-					layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
-					background = Theme.background
-					add(title)
-					add(subtitle)
-				},
-				BorderLayout.CENTER,
-			)
+			textArea.add(title)
+			textArea.add(subtitle)
+			add(textArea, BorderLayout.CENTER)
 		}
 
 		override fun getListCellRendererComponent(
@@ -183,6 +189,7 @@ class HistoryPanel(
 			}
 			background = bg
 			cover.background = bg
+			textArea.background = bg
 			val foreground = if (isSelected) Color.WHITE else Theme.onBackground
 			title.foreground = foreground
 			subtitle.foreground = if (isSelected) Color.WHITE else Theme.onSurfaceVariant

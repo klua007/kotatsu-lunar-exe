@@ -75,6 +75,13 @@ class DetailsPanel(
 	}
 	private val favouriteButton = Ui.button(tr(K.DETAILS_ADD_FAVOURITE)) { toggleFavourite() }
 	private val readButton = Ui.accentButton(tr(K.ACTION_CONTINUE)) { continueReading() }
+	private val refreshButton = Ui.button(tr(K.DETAILS_REFRESH_CHAPTERS)) { refreshChapters() }.apply {
+		isVisible = false
+	}
+	private val browserButton = Ui.button(tr(K.DETAILS_OPEN_IN_BROWSER)) { openInBrowser() }.apply {
+		isVisible = false
+	}
+	private val chapterCountLabel = Ui.label("", Theme.fontSmall, Theme.onSurfaceVariant)
 
 	init {
 		background = Theme.background
@@ -105,7 +112,11 @@ class DetailsPanel(
 		background = Theme.background
 		border = BorderFactory.createEmptyBorder(12, 16, 8, 16)
 		add(
-			Ui.button("← " + tr(K.NAV_LIBRARY)) { navigator.backToLibrary() },
+			JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+				background = Theme.background
+				add(Ui.button("← " + tr(K.NAV_LIBRARY)) { navigator.backToLibrary() })
+				add(Ui.button(tr(K.NAV_HUB)) { navigator.showHub() })
+			},
 			BorderLayout.WEST,
 		)
 	}
@@ -140,6 +151,8 @@ class DetailsPanel(
 				alignmentX = LEFT_ALIGNMENT
 				add(Ui.button(tr(K.DETAILS_DOWNLOAD_CHAPTER)) { downloadSelectedChapter() })
 				add(Ui.button(tr(K.ACTION_DELETE)) { deleteSelectedDownload() })
+				add(refreshButton)
+				add(browserButton)
 			},
 		)
 		add(
@@ -164,7 +177,15 @@ class DetailsPanel(
 	private fun createChapterPanel(): JPanel = JPanel(BorderLayout()).apply {
 		background = Theme.background
 		border = BorderFactory.createEmptyBorder(0, 0, 0, 12)
-		add(Ui.subtitle(tr(K.DETAILS_CHAPTERS)).apply { border = BorderFactory.createEmptyBorder(0, 6, 6, 0) }, BorderLayout.NORTH)
+		add(
+			JPanel(BorderLayout()).apply {
+				background = Theme.background
+				border = BorderFactory.createEmptyBorder(0, 6, 6, 0)
+				add(Ui.subtitle(tr(K.DETAILS_CHAPTERS)), BorderLayout.WEST)
+				add(chapterCountLabel, BorderLayout.EAST)
+			},
+			BorderLayout.NORTH,
+		)
 		val scroll = JScrollPane(chapterList)
 		scroll.background = Theme.background
 		scroll.border = BorderFactory.createLineBorder(Theme.border)
@@ -198,10 +219,14 @@ class DetailsPanel(
 			}
 			val manga = details.manga
 			titleLabel.text = manga.displayTitle
+			val sourceTitle = repo.sourceFor(manga)?.descriptor?.title ?: manga.source
+			val isOnline = manga.source != org.koitharu.kotatsu.desktop.data.model.SOURCE_LOCAL
 			authorLabel.text = listOfNotNull(
 				manga.authors,
-				tr(K.LIBRARY_SOURCE) + ": " + manga.source,
+				(if (isOnline) tr(K.DETAILS_ONLINE_SOURCE) else tr(K.LIBRARY_SOURCE)) + ": " + sourceTitle,
 			).joinToString(" · ")
+			refreshButton.isVisible = isOnline && repo.sourceFor(manga) != null
+			browserButton.isVisible = isOnline && manga.publicUrl.startsWith("http")
 			val history = repo.activity.historyFor(id)
 			progressLabel.text = buildString {
 				append(tr(K.DETAILS_PROGRESS)).append(": ")
@@ -214,12 +239,45 @@ class DetailsPanel(
 
 			chapterListModel.clear()
 			details.sortedChapters.forEach { chapterListModel.addElement(it) }
+			chapterCountLabel.text = tr(K.DETAILS_CHAPTERS_COUNT).format(details.chapters.size)
+			if (details.chapters.isEmpty()) {
+				progressLabel.text = tr(K.DETAILS_NO_CHAPTERS)
+			}
 			if (chapterListModel.size > 0) {
 				val index = details.sortedChapters.indexOfFirst { it.chapterId == history?.chapterId }
 				chapterList.selectedIndex = index.coerceAtLeast(0)
 				chapterList.ensureIndexIsVisible(chapterList.selectedIndex)
 			}
 		}
+	}
+
+	private fun refreshChapters() {
+		val id = mangaId ?: return
+		navigator.setStatus(tr(K.APP_LOADING))
+		Async.compute({ repo.refreshRemote(id) }, onError = { error ->
+			navigator.setStatus(tr(K.APP_READY))
+			Ui.showError(this, error.message ?: error.javaClass.simpleName)
+		}) { outcome ->
+			navigator.setStatus(tr(K.APP_READY))
+			when (outcome) {
+				is org.koitharu.kotatsu.desktop.sources.SourceOutcome.Success ->
+					Ui.showInfo(this, tr(K.DETAILS_REFRESHED).format(outcome.value))
+
+				is org.koitharu.kotatsu.desktop.sources.SourceOutcome.Failure ->
+					Ui.showError(this, outcome.failure.message())
+			}
+			navigator.refreshAll()
+			onShown()
+		}
+	}
+
+	private fun openInBrowser() {
+		val url = details?.manga?.publicUrl ?: return
+		runCatching {
+			if (java.awt.Desktop.isDesktopSupported()) {
+				java.awt.Desktop.getDesktop().browse(java.net.URI.create(url))
+			}
+		}.onFailure { Ui.showError(this, it.message ?: it.javaClass.simpleName) }
 	}
 
 	private fun selectedChapter(): Chapter? = chapterList.selectedValue
@@ -279,6 +337,7 @@ class DetailsPanel(
 		init {
 			layout = BorderLayout()
 			background = Theme.background
+			isOpaque = true
 			border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
 			add(title, BorderLayout.CENTER)
 			add(subtitle, BorderLayout.EAST)
@@ -307,6 +366,11 @@ class DetailsPanel(
 			val foreground = if (isSelected) Color.WHITE else Theme.onBackground
 			title.foreground = foreground
 			subtitle.foreground = if (isSelected) Color.WHITE else Theme.onSurfaceVariant
+			// A JPanel renderer is not laid out by JList: without this the labels keep a zero size
+			// and the row is painted as an empty coloured band.
+			val width = list.width
+			if (width > 0) setSize(width, preferredSize.height)
+			Ui.layoutTree(this)
 			return this
 		}
 	}

@@ -19,6 +19,7 @@ import org.koitharu.kotatsu.desktop.test.TestRunner.assertTrue
 import org.koitharu.kotatsu.desktop.ui.Navigator
 import org.koitharu.kotatsu.desktop.ui.details.DetailsPanel
 import org.koitharu.kotatsu.desktop.ui.downloads.DownloadsPanel
+import org.koitharu.kotatsu.desktop.ui.hub.HubPanel
 import org.koitharu.kotatsu.desktop.ui.history.HistoryPanel
 import org.koitharu.kotatsu.desktop.ui.library.LibraryPanel
 import org.koitharu.kotatsu.desktop.ui.reader.PageLayout
@@ -36,6 +37,8 @@ object UiTests {
 		var openedReader: Triple<Long, Int, Int>? = null
 
 		override fun showLibrary() = Unit
+
+		override fun showHub() = Unit
 
 		override fun showHistory() = Unit
 
@@ -190,6 +193,71 @@ object UiTests {
 			val settings = SettingsPanel(repo, navigator)
 			settings.onShown()
 			assertTrue("settings painted", hasVisiblePixels(render(settings)))
+		}
+
+		TestRunner.test("hub panel lists the sources and paints without network access") {
+			val repo = newRepositoryWithContent()
+			val hub = HubPanel(repo, RecordingNavigator())
+			hub.onShown()
+			val image = render(hub)
+			assertTrue("hub painted", hasVisiblePixels(image))
+			assertTrue("catalogue non-empty", repo.sourceCatalog().isNotEmpty())
+			assertTrue("no network in tests", repo.sourceCatalog().isNotEmpty())
+		}
+
+		TestRunner.test("list row renderers lay their text out (regression: blank history rows)") {
+			// Rows are custom JPanels. JList paints them through CellRendererPane without validating
+			// them, so a renderer that does not lay out its own subtree paints coloured bands with no
+			// text. This checks the row produced by the real HistoryPanel renderer.
+			val repo = newRepositoryWithContent()
+			val history = HistoryPanel(repo, RecordingNavigator())
+			history.onShown()
+			history.setSize(900, 600)
+			layoutTree(history)
+			val listField = HistoryPanel::class.java.getDeclaredField("list").apply { isAccessible = true }
+			val list = listField.get(history) as javax.swing.JList<*>
+			// The panel loads its rows on a worker thread; wait for the result instead of racing it.
+			val deadline = System.currentTimeMillis() + 5_000
+			while (list.model.size == 0 && System.currentTimeMillis() < deadline) {
+				Thread.sleep(20)
+				javax.swing.SwingUtilities.invokeAndWait { }
+			}
+			assertEquals("history rows", 1, list.model.size)
+			// A real window sizes the list through its scroll pane; off-screen the rows get the width
+			// the renderer is given, which is what the bug was about.
+			list.setSize(900, 400)
+			val renderer = list.cellRenderer as javax.swing.ListCellRenderer<Any?>
+			@Suppress("UNCHECKED_CAST")
+			val row = renderer.getListCellRendererComponent(
+				list as javax.swing.JList<out Any?>,
+				list.model.getElementAt(0),
+				0,
+				false,
+				false,
+			) as java.awt.Container
+			val texts = ArrayList<javax.swing.JLabel>()
+			fun collect(component: java.awt.Container) {
+				component.components.forEach { child ->
+					if (child is javax.swing.JLabel) texts.add(child)
+					if (child is java.awt.Container) collect(child)
+				}
+			}
+			collect(row)
+			assertTrue("row has labels", texts.isNotEmpty())
+			// The renderer lays itself out while painting (as JList does), so paint one row.
+			val image = BufferedImage(900, 80, BufferedImage.TYPE_INT_RGB)
+			val graphics = image.createGraphics()
+			try {
+				row.setSize(900, 64)
+				row.paint(graphics)
+			} finally {
+				graphics.dispose()
+			}
+			assertTrue(
+				"labels have a non-zero width (found ${texts.map { it.width }})",
+				texts.any { it.width > 0 && it.height > 0 },
+			)
+			assertTrue("labels carry text", texts.any { it.text.isNotBlank() })
 		}
 
 		TestRunner.test("empty library still paints an explanatory state") {

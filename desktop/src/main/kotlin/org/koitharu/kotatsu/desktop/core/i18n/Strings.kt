@@ -260,12 +260,146 @@ internal object Strings {
 
 		K.SOURCES_TITLE to row("Online sources", "Fontes online"),
 		K.SOURCES_UNAVAILABLE to row(
-			"Online sources are not available in this desktop build yet. See docs/FEATURE_MATRIX.md.",
-			"As fontes online ainda não estão disponíveis nesta versão de desktop. Veja docs/FEATURE_MATRIX.md.",
+			"Sources this build cannot run (the Android parser pack) are listed in Explore with the reason.",
+			"As fontes que esta versão não executa (pacote de parsers do Android) aparecem em Explorar com o motivo.",
 		),
 		K.SOURCES_SEARCH_LOCAL_ONLY to row(
-			"Searching local library only",
+			"Searching the local library only",
 			"Pesquisando apenas na biblioteca local",
 		),
+
+		K.NAV_HUB to row("Explore", "Explorar"),
+		K.HUB_TITLE to row("Explore sources", "Explorar fontes"),
+		K.HUB_SEARCH_HINT to row("Search titles in the enabled sources…", "Pesquisar títulos nas fontes ativas…"),
+		K.HUB_SEARCH_BUTTON to row("Search", "Pesquisar"),
+		K.HUB_SEARCHING to row("Searching…", "Pesquisando…"),
+		K.HUB_BROWSE to row("Popular now", "Populares agora"),
+		K.HUB_SOURCES to row("Sources", "Fontes"),
+		K.HUB_RESULTS to row("Results", "Resultados"),
+		K.HUB_RESULTS_COUNT to row("%d results", "%d resultados"),
+		K.HUB_NO_RESULTS to row("No titles found. Try another term or enable more sources.", "Nenhum título encontrado. Tente outro termo ou ative mais fontes."),
+		K.HUB_EMPTY_HINT to row(
+			"Search a title above, or press \"Popular now\" to browse the enabled sources. Results from each source appear here, and any source that fails is reported below.",
+			"Pesquise um título acima ou use \"Populares agora\" para navegar pelas fontes ativas. Os resultados aparecem aqui e qualquer fonte que falhar é informada abaixo.",
+		),
+		K.HUB_NO_SOURCES to row(
+			"No source is enabled. Enable one below (or add an OPDS catalogue) to search online.",
+			"Nenhuma fonte está ativa. Ative uma abaixo (ou adicione um catálogo OPDS) para pesquisar online.",
+		),
+		K.HUB_SOURCE_ENABLED to row("Enabled", "Ativa"),
+		K.HUB_SOURCE_DISABLED to row("Disabled", "Desativada"),
+		K.HUB_PIN to row("Pin", "Fixar"),
+		K.HUB_UNPIN to row("Unpin", "Desafixar"),
+		K.HUB_CHECK to row("Check", "Testar"),
+		K.HUB_CHECK_ALL to row("Check all", "Testar todas"),
+		K.HUB_AVAILABLE to row("Reachable", "Acessível"),
+		K.HUB_UNAVAILABLE to row("Unreachable", "Inacessível"),
+		K.HUB_UNKNOWN to row("Not checked yet", "Ainda não testada"),
+		K.HUB_LATENCY to row("%d ms", "%d ms"),
+		K.HUB_FAILURES to row("Some sources failed: %s", "Algumas fontes falharam: %s"),
+		K.HUB_OPEN to row("Open", "Abrir"),
+		K.HUB_IN_LIBRARY to row("In library", "Na biblioteca"),
+		K.HUB_ADD to row("Add to library", "Adicionar à biblioteca"),
+		K.HUB_ADD_OPDS to row("Add OPDS catalogue…", "Adicionar catálogo OPDS…"),
+		K.HUB_ADD_OPDS_NAME to row("Catalogue name", "Nome do catálogo"),
+		K.HUB_ADD_OPDS_URL to row("Catalogue URL", "URL do catálogo"),
+		K.HUB_ADD_OPDS_HINT to row(
+			"Paste the OPDS/Atom URL of your server (for example Komga: http://localhost:25600/opds/v1.2/catalog).",
+			"Cole a URL OPDS/Atom do seu servidor (por exemplo Komga: http://localhost:25600/opds/v1.2/catalog).",
+		),
+		K.HUB_OPDS_NAME_HINT to row("My server", "Meu servidor"),
+		K.HUB_REMOVE_CATALOG to row("Remove catalogue", "Remover catálogo"),
+		K.HUB_REMOVE_CATALOG_CONFIRM to row(
+			"Remove this catalogue? Library entries from it are kept.",
+			"Remover este catálogo? Os títulos da biblioteca que vieram dele são mantidos.",
+		),
+		K.HUB_MIRROR to row("Alternative base URL", "URL base alternativa"),
+		K.HUB_MIRROR_HINT to row(
+			"Optional. Leave empty to use the default address.",
+			"Opcional. Deixe vazio para usar o endereço padrão.",
+		),
+		K.HUB_MIRROR_RESET to row("Use default", "Usar padrão"),
+		K.HUB_FILTER_NSFW to row("Include adult content", "Incluir conteúdo adulto"),
+		K.HUB_FILTER_TAGS to row("Tags (comma separated)", "Tags (separadas por vírgula)"),
+		K.HUB_FILTER_APPLY to row("Apply filters", "Aplicar filtros"),
+		K.HUB_FILTER_CLEAR to row("Clear filters", "Limpar filtros"),
+		K.HUB_LOAD_MORE to row("Load more", "Carregar mais"),
+		K.HUB_SOURCE_COUNT to row("%d sources", "%d fontes"),
+		K.HUB_ENABLED_COUNT to row("%d enabled", "%d ativas"),
+		K.HUB_LOCAL_CARD to row("Local files", "Arquivos locais"),
+		K.HUB_LOCAL_CARD_HINT to row(
+			"CBZ/ZIP and folders on this computer — always available, no network needed.",
+			"CBZ/ZIP e pastas neste computador — sempre disponíveis, sem rede.",
+		),
+		K.HUB_LANGUAGE to row("Languages", "Idiomas"),
+		K.HUB_SOURCE_UNAVAILABLE_REASON to row("Why: %s", "Motivo: %s"),
+
+		K.SOURCES_ERROR_OFFLINE to row(
+			"Network unavailable. Check your connection and try again.",
+			"Rede indisponível. Verifique a conexão e tente novamente.",
+		),
+		K.SOURCES_ERROR_TIMEOUT to row(
+			"The source did not answer in time. Try again later.",
+			"A fonte não respondeu a tempo. Tente novamente mais tarde.",
+		),
+		K.SOURCES_ERROR_HTTP to row("The source answered with HTTP error %d.", "A fonte respondeu com erro HTTP %d."),
+		K.SOURCES_ERROR_RATE_LIMITED to row(
+			"Too many requests. Wait %d seconds and try again.",
+			"Muitas requisições. Aguarde %d segundos e tente novamente.",
+		),
+		K.SOURCES_ERROR_RATE_LIMITED_GENERIC to row(
+			"Too many requests. Wait a moment and try again.",
+			"Muitas requisições. Aguarde um momento e tente novamente.",
+		),
+		K.SOURCES_ERROR_NOT_FOUND to row(
+			"Title or chapter not found (it may have been removed).",
+			"Título ou capítulo não encontrado (pode ter sido removido).",
+		),
+		K.SOURCES_ERROR_INVALID to row(
+			"The source answered with data this build cannot read.",
+			"A fonte respondeu com dados que esta versão não consegue ler.",
+		),
+		K.SOURCES_ERROR_UNAVAILABLE to row("This source is not available.", "Esta fonte não está disponível."),
+		K.SOURCES_ERROR_CANCELLED to row("The request was cancelled.", "A requisição foi cancelada."),
+		K.SOURCES_ERROR_IO to row("Could not read or write the downloaded file.", "Não foi possível ler ou gravar o arquivo baixado."),
+		K.SOURCES_REASON_PARSER_PACK to row(
+			"Needs the Kotatsu parser pack (kotatsu-parsers-redo), which is not bundled with this build.",
+			"Exige o pacote de parsers do Kotatsu (kotatsu-parsers-redo), que não é incluído nesta versão.",
+		),
+		K.SOURCES_REASON_CLOUDFLARE to row(
+			"The site requires a browser (Cloudflare/JavaScript challenge); the desktop build has no WebView.",
+			"O site exige um navegador (desafio Cloudflare/JavaScript); a versão desktop não tem WebView.",
+		),
+		K.SOURCES_REASON_JAVASCRIPT to row(
+			"The site renders its catalogue with JavaScript; the desktop build reads only HTML/JSON APIs.",
+			"O site monta o catálogo com JavaScript; a versão desktop lê apenas APIs HTML/JSON.",
+		),
+
+		K.DETAILS_REFRESH_CHAPTERS to row("Refresh chapters", "Atualizar capítulos"),
+		K.DETAILS_CHAPTERS_COUNT to row("%d chapters", "%d capítulos"),
+		K.DETAILS_ONLINE_SOURCE to row("Online source", "Fonte online"),
+		K.DETAILS_REFRESHED to row("%d chapters updated", "%d capítulos atualizados"),
+		K.DETAILS_OPEN_IN_BROWSER to row("Open in browser", "Abrir no navegador"),
+
+		K.READER_ERROR_NETWORK to row(
+			"Could not load this page. Check the connection and try again.",
+			"Não foi possível carregar esta página. Verifique a conexão e tente novamente.",
+		),
+		K.READER_ERROR_DECODE to row(
+			"This page uses an image format this build cannot display.",
+			"Esta página usa um formato de imagem que esta versão não exibe.",
+		),
+		K.READER_OFFLINE_PAGE to row("Page cached for offline reading", "Página em cache para leitura offline"),
+
+		K.SETTINGS_SOURCES_SUMMARY to row(
+			"%d online sources available",
+			"%d fontes online disponíveis",
+		),
+		K.SETTINGS_UNSUPPORTED_TITLES to row(
+			"%d titles from sources this build cannot open",
+			"%d títulos de fontes que esta versão não abre",
+		),
+		K.SETTINGS_PAGE_CACHE to row("Page cache", "Cache de páginas"),
+		K.SETTINGS_CLEAR_PAGE_CACHE to row("Clear page cache", "Limpar cache de páginas"),
 	)
 }

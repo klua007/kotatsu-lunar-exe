@@ -95,6 +95,9 @@ class DownloadsPanel(
 		add(
 			JPanel(FlowLayout(FlowLayout.LEFT, 8, 2)).apply {
 				background = Theme.background
+				// BoxLayout gives the extra vertical space to the first component whose maximum
+				// allows it; without a cap the header would stretch and push the chapters down.
+				maximumSize = Dimension(Int.MAX_VALUE, 40)
 				add(Ui.label(manga.displayTitle, Theme.fontH2))
 				add(Ui.label(tr(K.DOWNLOADS_CHAPTERS).format(chapters.size), Theme.fontSmall, Theme.onSurfaceVariant))
 				add(Ui.button(tr(K.ACTION_OPEN)) { navigator.showDetails(manga.id) })

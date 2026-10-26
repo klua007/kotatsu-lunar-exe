@@ -67,6 +67,17 @@ object ImageDecoder {
  * Memory is bounded by entry count rather than bytes, which is predictable enough for a reader
  * that keeps a handful of pages around.
  */
+sealed class PageLoad {
+
+	data class Ok(val image: BufferedImage) : PageLoad()
+
+	/** The page bytes could not be obtained (offline, timeout, HTTP error, not downloaded yet). */
+	data object Missing : PageLoad()
+
+	/** The bytes arrived but the image format is not supported by ImageIO (WebP/AVIF). */
+	data object Undecodable : PageLoad()
+}
+
 object PageImageCache {
 
 	private const val MAX_ENTRIES = 12
@@ -90,12 +101,19 @@ object PageImageCache {
 	}
 
 	/** Loads a page on the calling thread (used by the EDT for the visible page). */
-	fun load(chapterId: Long, page: Int, content: ChapterContent): BufferedImage? {
-		get(chapterId, page)?.let { return it }
-		val bytes = content.readPage(page) ?: return null
-		val image = ImageDecoder.decode(bytes) ?: return null
+	fun load(chapterId: Long, page: Int, content: ChapterContent): BufferedImage? =
+		(loadDetailed(chapterId, page, content) as? PageLoad.Ok)?.image
+
+	/**
+	 * Like [load] but keeps the reason of a failure so the reader can show "network" instead of
+	 * "still loading" for a remote page, or "unsupported format" for a WebP/AVIF page.
+	 */
+	fun loadDetailed(chapterId: Long, page: Int, content: ChapterContent): PageLoad {
+		get(chapterId, page)?.let { return PageLoad.Ok(it) }
+		val bytes = content.readPage(page) ?: return PageLoad.Missing
+		val image = ImageDecoder.decode(bytes) ?: return PageLoad.Undecodable
 		put(chapterId, page, image)
-		return image
+		return PageLoad.Ok(image)
 	}
 
 	/** Decodes in the background so that scrolling feels immediate. */

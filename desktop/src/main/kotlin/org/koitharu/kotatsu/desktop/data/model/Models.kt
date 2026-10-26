@@ -58,6 +58,8 @@ data class Manga(
 	/** Epoch millis; desktop-only bookkeeping columns. */
 	val createdAt: Long = 0L,
 	val updatedAt: Long = 0L,
+	/** Identifier inside the online source; needed to refresh chapters later. */
+	val remoteId: String? = null,
 ) {
 
 	val displayTitle: String
@@ -82,6 +84,10 @@ data class Chapter(
 	/** True when a local offline copy exists under `<data>/downloads`. */
 	val isDownloaded: Boolean = false,
 	val isRead: Boolean = false,
+	/** Identifier inside the online source (MangaDex chapter UUID, OPDS archive URL). */
+	val remoteId: String? = null,
+	/** "PAGES" or "ARCHIVE" for chapters that come from an online source. */
+	val remoteKind: String? = null,
 )
 
 data class MangaWithChapters(
@@ -192,6 +198,7 @@ fun Manga.toJson(): JsonValue.Obj = jsonObject {
 	put("source", stringJson(source))
 	put("created_at", longJson(createdAt))
 	put("updated_at", longJson(updatedAt))
+	put("remote_id", stringJson(remoteId))
 	put(
 		"tags",
 		jsonArray {
@@ -247,6 +254,7 @@ fun mangaFromJson(value: JsonValue?): Manga? {
 		source = obj["source"].asStringOrNull() ?: SOURCE_LOCAL,
 		createdAt = obj["created_at"].asLongOrNull() ?: 0L,
 		updatedAt = obj["updated_at"].asLongOrNull() ?: 0L,
+		remoteId = obj["remote_id"].asStringOrNull(),
 	)
 }
 
@@ -265,6 +273,9 @@ fun Chapter.toJson(): JsonValue.Obj = jsonObject {
 	put("pages_count", intJson(pagesCount))
 	put("downloaded", JsonValue.Bool(isDownloaded))
 	put("read", JsonValue.Bool(isRead))
+	// Desktop-only columns; an Android backup simply does not contain them.
+	put("remote_id", stringJson(remoteId))
+	put("remote_kind", stringJson(remoteKind))
 }
 
 fun chapterFromJson(value: JsonValue?): Chapter? {
@@ -284,6 +295,8 @@ fun chapterFromJson(value: JsonValue?): Chapter? {
 		pagesCount = obj["pages_count"].asLongOrNull()?.toInt() ?: 0,
 		isDownloaded = obj["downloaded"].asBooleanOrNull() ?: false,
 		isRead = obj["read"].asBooleanOrNull() ?: false,
+		remoteId = obj["remote_id"].asStringOrNull(),
+		remoteKind = obj["remote_kind"].asStringOrNull(),
 	)
 }
 
