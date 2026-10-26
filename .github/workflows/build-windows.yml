@@ -156,32 +156,49 @@ jobs:
 
       - name: Verify the produced .exe
         run: |
+          $ErrorActionPreference = 'Stop'
           # jpackage builds a GUI-subsystem launcher, so the exit code must be read through
           # Start-Process; `& $exe` would not wait for it.
           function Invoke-Launcher {
             param([string]$Exe, [string]$Arguments, [string]$Log)
             $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -NoNewWindow -Wait -PassThru `
               -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
-            Write-Host "---- $Arguments (exit $($proc.ExitCode)) ----"
+            Write-Host "---- $Exe $Arguments (exit $($proc.ExitCode)) ----"
             if (Test-Path $Log) { Get-Content $Log }
             if (Test-Path "$Log.err") { Get-Content "$Log.err" }
             return $proc.ExitCode
           }
 
-          $exe = "build\package\KotatsuLunar\KotatsuLunar.exe"
-          Get-Item $exe | Select-Object FullName, Length | Format-List
-          $versionCode = Invoke-Launcher $exe "--version" "build\exe-version.log"
-          if ($versionCode -ne 0) { throw ".exe --version exited with $versionCode" }
-          $smokeCode = Invoke-Launcher $exe "--smoke-test" "build\exe-smoke.log"
-          if ($smokeCode -ne 0) {
-            Write-Host "::error title=Packaged launcher::smoke test exited with $smokeCode"
-            if (Test-Path "build\exe-smoke.log") {
-              Get-Content "build\exe-smoke.log" -Tail 20 | Where-Object { $_ -match '\S' } | ForEach-Object {
-                Write-Host "::error file=build/exe-smoke.log::$($_.Replace('%','%25'))"
+          function Report-Failure {
+            param([string]$Title, [string]$Log)
+            Write-Host "::error title=$Title::$Title (see $Log)"
+            foreach ($candidate in @($Log, "$Log.err")) {
+              if (Test-Path $candidate) {
+                Get-Content $candidate -Tail 25 | Where-Object { $_ -match '\S' } | ForEach-Object {
+                  $line = $_.Replace('%', '%25')
+                  Write-Host "::error file=$candidate::$line"
+                }
               }
             }
-            if (Test-Path "build\exe-smoke.log.err") { Get-Content "build\exe-smoke.log.err" -Tail 20 }
-            throw ".exe smoke test exited with $smokeCode"
+          }
+
+          try {
+            $exe = "build\package\KotatsuLunar\KotatsuLunar.exe"
+            Get-Item $exe | Select-Object FullName, Length | Format-List
+            $versionCode = Invoke-Launcher $exe "--version" "build\exe-version.log"
+            if ($versionCode -ne 0) {
+              Report-Failure "Packaged launcher: --version failed" "build\exe-version.log"
+              throw ".exe --version exited with $versionCode"
+            }
+            $smokeCode = Invoke-Launcher $exe "--smoke-test" "build\exe-smoke.log"
+            if ($smokeCode -ne 0) {
+              Report-Failure "Packaged launcher: smoke test failed" "build\exe-smoke.log"
+              throw ".exe smoke test exited with $smokeCode"
+            }
+          }
+          catch {
+            Write-Host "::error title=Verify launcher step::$($_.Exception.Message)"
+            throw
           }
 
       - name: Build portable package and MSI
@@ -225,7 +242,7 @@ jobs:
         run: |
           $summary = $env:GITHUB_STEP_SUMMARY
           "## Build diagnostics" | Out-File -Append -FilePath $summary
-          foreach ($log in @("build\test-output.log")) {
+          foreach ($log in @("build\test-output.log", "build\exe-version.log", "build\exe-version.log.err", "build\exe-smoke.log", "build\exe-smoke.log.err")) {
             if (Test-Path $log) {
               "### $log (tail)" | Out-File -Append -FilePath $summary
               "``````" | Out-File -Append -FilePath $summary
