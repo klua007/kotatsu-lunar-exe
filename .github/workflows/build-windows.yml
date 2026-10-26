@@ -5,6 +5,9 @@ name: Build Windows desktop app
 # and — when the WiX toolset is available — the .msi installer. Artifacts are attached to the run and
 # to a GitHub Release when a v* tag is pushed.
 #
+# The steps mirror scripts/build-windows.ps1 but are split so that a failure is attributable from the
+# job summary (Actions API) alone, without downloading the raw log.
+#
 # It does not touch the Android application in app/; that one keeps its upstream build.
 
 on:
@@ -21,11 +24,15 @@ permissions:
 
 env:
   KOTLIN_VERSION: '2.1.21'
+  APP_VERSION: '0.1.0'
 
 jobs:
   windows:
     name: Build (windows-latest, x64)
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,44 +46,145 @@ jobs:
 
       - name: Install WiX toolset (for the .msi)
         continue-on-error: true
-        shell: pwsh
         run: |
           $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*" -Directory -ErrorAction SilentlyContinue
-          if (-not $wix) {
-            choco install wixtoolset --no-progress -y
-          }
+          if (-not $wix) { choco install wixtoolset --no-progress -y }
 
       - name: Download Kotlin compiler
-        shell: pwsh
         run: |
-          $version = "$env:KOTLIN_VERSION"
-          $url = "https://github.com/JetBrains/kotlin/releases/download/v$version/kotlin-compiler-$version.zip"
-          Write-Host "downloading $url"
+          $url = "https://github.com/JetBrains/kotlin/releases/download/v$env:KOTLIN_VERSION/kotlin-compiler-$env:KOTLIN_VERSION.zip"
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\kotlin.zip"
           Expand-Archive -Path "$env:RUNNER_TEMP\kotlin.zip" -DestinationPath "$env:RUNNER_TEMP\kotlin" -Force
           "KOTLINC_HOME=$env:RUNNER_TEMP\kotlin\kotlinc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem "$env:RUNNER_TEMP\kotlin\kotlinc\bin\kotlinc.bat"
 
-      - name: Compile, test, package
-        shell: pwsh
+      - name: Show toolchain
         run: |
-          Write-Host "kotlinc: $env:KOTLINC_HOME"
-          pwsh -File scripts/build-windows.ps1
+          Write-Host "java: $((& java -version 2>&1) -join ' ')"; Write-Host "JAVA_HOME=$env:JAVA_HOME"
+          Write-Host "KOTLINC_HOME=$env:KOTLINC_HOME"
+          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -version
 
-      - name: Verify packaged launcher (headless smoke test)
-        shell: pwsh
+      - name: Compile desktop sources
         run: |
-          $launcher = "build\package\KotatsuLunar\KotatsuLunar.exe"
-          if (-not (Test-Path $launcher)) { throw "launcher not found: $launcher" }
-          & $launcher --version
-          if ($LASTEXITCODE -ne 0) { throw "launcher --version failed" }
-          & $launcher --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "launcher smoke test failed" }
+          New-Item -ItemType Directory -Force -Path build\classes\main | Out-Null
+          $src = Get-ChildItem desktop\src\main\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          Write-Host "compiling $($src.Count) files"
+          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn -d build\classes\main @src
+          if ($LASTEXITCODE -ne 0) { throw "kotlinc failed with exit code $LASTEXITCODE" }
+          Get-ChildItem build\classes\main -Recurse -Filter *.class | Measure-Object | Select-Object -ExpandProperty Count
+
+      - name: Run test suite
+        run: |
+          New-Item -ItemType Directory -Force -Path build\classes\test | Out-Null
+          $src = Get-ChildItem desktop\src\test\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          $stdlib = Join-Path (Split-Path -Parent (Split-Path -Parent $env:KOTLINC_HOME)) "kotlinc\lib\kotlin-stdlib.jar"
+          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn "-Xfriend-paths=build\classes\main" -classpath build\classes\main -d build\classes\test @src
+          if ($LASTEXITCODE -ne 0) { throw "test compilation failed" }
+          & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "build\classes\main;build\classes\test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt
+          if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE" }
+
+      - name: Build runnable jar
+        run: |
+          New-Item -ItemType Directory -Force -Path build\dist | Out-Null
+          $stage = "build\jar-stage"
+          Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Path "build\classes\main\*" -Destination $stage -Recurse -Force
+
+          $stdlib = Join-Path (Split-Path -Parent (Split-Path -Parent $env:KOTLINC_HOME)) "kotlinc\lib\kotlin-stdlib.jar"
+          if (-not (Test-Path $stdlib)) { throw "kotlin-stdlib.jar not found at $stdlib" }
+          $unzipped = "build\stdlib"
+          Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
+          Expand-Archive -Path $stdlib -DestinationPath $unzipped -Force
+          Remove-Item -Force "$unzipped\META-INF\MANIFEST.MF" -ErrorAction SilentlyContinue
+          Remove-Item -Force "$unzipped\module-info.class" -ErrorAction SilentlyContinue
+          Copy-Item -Path "$unzipped\*" -Destination $stage -Recurse -Force
+
+          & jar --create --file build\dist\kotatsu-lunar.jar --main-class org.koitharu.kotatsu.desktop.MainKt -C $stage .
+          if ($LASTEXITCODE -ne 0) { throw "jar creation failed" }
+
+      - name: Smoke test the jar
+        run: |
+          & java -jar build\dist\kotatsu-lunar.jar --version
+          if ($LASTEXITCODE -ne 0) { throw "jar --version failed" }
+          & java -jar build\dist\kotatsu-lunar.jar --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "jar smoke test failed" }
+
+      - name: Package native application (jpackage app-image)
+        run: |
+          $input = "build\jpackage-input"
+          Remove-Item -Recurse -Force $input -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $input | Out-Null
+          Copy-Item build\dist\kotatsu-lunar.jar $input -Force
+          $args = @(
+            "--type", "app-image",
+            "--name", "KotatsuLunar",
+            "--app-version", $env:APP_VERSION,
+            "--vendor", "Kotatsu Lunar (unofficial desktop port)",
+            "--description", "Kotatsu Lunar - unofficial Windows port of Kotatsu-Redo",
+            "--input", $input,
+            "--main-jar", "kotatsu-lunar.jar",
+            "--main-class", "org.koitharu.kotatsu.desktop.MainKt",
+            "--dest", "build\package",
+            "--java-options", "-Xmx1536m",
+            "--java-options", "-Dfile.encoding=UTF-8",
+            "--icon", "desktop\resources\icon.ico"
+          )
+          & jpackage @args
+          if ($LASTEXITCODE -ne 0) { throw "jpackage app-image failed" }
+          if (-not (Test-Path "build\package\KotatsuLunar\KotatsuLunar.exe")) { throw "KotatsuLunar.exe was not produced" }
+
+      - name: Verify the produced .exe
+        run: |
+          $exe = "build\package\KotatsuLunar\KotatsuLunar.exe"
+          Get-Item $exe | Select-Object FullName, Length
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw ".exe --version failed with $LASTEXITCODE" }
+          & $exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw ".exe smoke test failed with $LASTEXITCODE" }
+
+      - name: Build portable package and MSI
+        run: |
+          $appImage = "build\package\KotatsuLunar"
+          foreach ($doc in @("README.md", "LICENSE", "NOTICE.md")) {
+            if (Test-Path $doc) { Copy-Item $doc $appImage -Force }
+          }
+          $zip = "build\dist\KotatsuLunar-$env:APP_VERSION-windows-x64-portable.zip"
+          Remove-Item -Force $zip -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$appImage\*" -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "portable: $zip ($((Get-Item $zip).Length) bytes)"
+
+          $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*" -Directory -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $wix) {
+            Write-Host "::warning::WiX not found, skipping the MSI installer"
+            return
+          }
+          $env:PATH = (Join-Path $wix.FullName "bin") + ";" + $env:PATH
+          $args = @(
+            "--type", "msi",
+            "--name", "KotatsuLunar",
+            "--app-version", $env:APP_VERSION,
+            "--vendor", "Kotatsu Lunar (unofficial desktop port)",
+            "--description", "Kotatsu Lunar - unofficial Windows port of Kotatsu-Redo",
+            "--input", "build\jpackage-input",
+            "--main-jar", "kotatsu-lunar.jar",
+            "--main-class", "org.koitharu.kotatsu.desktop.MainKt",
+            "--dest", "build\dist",
+            "--java-options", "-Xmx1536m",
+            "--java-options", "-Dfile.encoding=UTF-8",
+            "--icon", "desktop\resources\icon.ico",
+            "--win-menu", "--win-shortcut", "--win-dir-chooser", "--win-per-user-install"
+          )
+          & jpackage @args
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::MSI creation failed; the portable zip is still available" }
 
       - name: Show artifacts
-        shell: pwsh
-        run: Get-ChildItem -Recurse build\dist | Select-Object FullName, Length | Format-Table -AutoSize
+        if: always()
+        run: Get-ChildItem -Recurse build\dist -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table -AutoSize
 
       - name: Upload Windows portable package
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kotatsu-lunar-windows-x64-portable
@@ -84,6 +192,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload jar
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kotatsu-lunar-jar
@@ -91,6 +200,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload MSI installer
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kotatsu-lunar-windows-x64-msi
