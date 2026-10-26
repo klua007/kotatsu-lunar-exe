@@ -164,9 +164,11 @@ jobs:
             $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -NoNewWindow -Wait -PassThru `
               -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
             Write-Host "---- $Exe $Arguments (exit $($proc.ExitCode)) ----"
-            if (Test-Path $Log) { Get-Content $Log }
-            if (Test-Path "$Log.err") { Get-Content "$Log.err" }
-            return $proc.ExitCode
+            # Write-Host keeps the log out of this function's output stream: otherwise the caller
+            # would receive an array ("Kotatsu Lunar 0.1.0", 0) instead of the exit code.
+            if (Test-Path $Log) { Write-Host ((Get-Content $Log) -join "`n") }
+            if (Test-Path "$Log.err") { Write-Host ((Get-Content "$Log.err") -join "`n") }
+            return [int]$proc.ExitCode
           }
 
           function Report-Failure {
