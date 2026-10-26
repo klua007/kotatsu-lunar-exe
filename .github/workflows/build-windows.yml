@@ -77,11 +77,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build\classes\test | Out-Null
           $src = Get-ChildItem desktop\src\test\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
-          $stdlib = Join-Path (Split-Path -Parent (Split-Path -Parent $env:KOTLINC_HOME)) "kotlinc\lib\kotlin-stdlib.jar"
+          $stdlib = Join-Path $env:KOTLINC_HOME "lib\kotlin-stdlib.jar"
           & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn "-Xfriend-paths=build\classes\main" -classpath build\classes\main -d build\classes\test @src
           if ($LASTEXITCODE -ne 0) { throw "test compilation failed" }
-          & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "build\classes\main;build\classes\test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt
-          if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE" }
+          & java -Dkotatsu.test=1 "-Djava.awt.headless=true" -cp "build\classes\main;build\classes\test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
+            Tee-Object -FilePath build\test-output.log
+          if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE (see build\test-output.log)" }
 
       - name: Build runnable jar
         run: |
@@ -91,7 +92,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item -Path "build\classes\main\*" -Destination $stage -Recurse -Force
 
-          $stdlib = Join-Path (Split-Path -Parent (Split-Path -Parent $env:KOTLINC_HOME)) "kotlinc\lib\kotlin-stdlib.jar"
+          $stdlib = Join-Path $env:KOTLINC_HOME "lib\kotlin-stdlib.jar"
           if (-not (Test-Path $stdlib)) { throw "kotlin-stdlib.jar not found at $stdlib" }
           $unzipped = "build\stdlib"
           Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
@@ -178,6 +179,20 @@ jobs:
           )
           & jpackage @args
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::MSI creation failed; the portable zip is still available" }
+
+      - name: Diagnostics (logs in the job summary)
+        if: always()
+        run: |
+          $summary = $env:GITHUB_STEP_SUMMARY
+          "## Build diagnostics" | Out-File -Append -FilePath $summary
+          foreach ($log in @("build\test-output.log")) {
+            if (Test-Path $log) {
+              "### $log (tail)" | Out-File -Append -FilePath $summary
+              "``````" | Out-File -Append -FilePath $summary
+              Get-Content $log -Tail 80 | Out-File -Append -FilePath $summary
+              "``````" | Out-File -Append -FilePath $summary
+            }
+          }
 
       - name: Show artifacts
         if: always()
