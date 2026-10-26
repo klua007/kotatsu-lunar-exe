@@ -156,12 +156,33 @@ jobs:
 
       - name: Verify the produced .exe
         run: |
+          # jpackage builds a GUI-subsystem launcher, so the exit code must be read through
+          # Start-Process; `& $exe` would not wait for it.
+          function Invoke-Launcher {
+            param([string]$Exe, [string]$Arguments, [string]$Log)
+            $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -NoNewWindow -Wait -PassThru `
+              -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
+            Write-Host "---- $Arguments (exit $($proc.ExitCode)) ----"
+            if (Test-Path $Log) { Get-Content $Log }
+            if (Test-Path "$Log.err") { Get-Content "$Log.err" }
+            return $proc.ExitCode
+          }
+
           $exe = "build\package\KotatsuLunar\KotatsuLunar.exe"
-          Get-Item $exe | Select-Object FullName, Length
-          & $exe --version
-          if ($LASTEXITCODE -ne 0) { throw ".exe --version failed with $LASTEXITCODE" }
-          & $exe --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw ".exe smoke test failed with $LASTEXITCODE" }
+          Get-Item $exe | Select-Object FullName, Length | Format-List
+          $versionCode = Invoke-Launcher $exe "--version" "build\exe-version.log"
+          if ($versionCode -ne 0) { throw ".exe --version exited with $versionCode" }
+          $smokeCode = Invoke-Launcher $exe "--smoke-test" "build\exe-smoke.log"
+          if ($smokeCode -ne 0) {
+            Write-Host "::error title=Packaged launcher::smoke test exited with $smokeCode"
+            if (Test-Path "build\exe-smoke.log") {
+              Get-Content "build\exe-smoke.log" -Tail 20 | Where-Object { $_ -match '\S' } | ForEach-Object {
+                Write-Host "::error file=build/exe-smoke.log::$($_.Replace('%','%25'))"
+              }
+            }
+            if (Test-Path "build\exe-smoke.log.err") { Get-Content "build\exe-smoke.log.err" -Tail 20 }
+            throw ".exe smoke test exited with $smokeCode"
+          }
 
       - name: Build portable package and MSI
         run: |
