@@ -24,7 +24,7 @@ permissions:
 
 env:
   KOTLIN_VERSION: '2.1.21'
-  APP_VERSION: '0.1.0'
+  APP_VERSION: '0.2.0'
 
 jobs:
   windows:
@@ -165,7 +165,7 @@ jobs:
               -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
             Write-Host "---- $Exe $Arguments (exit $($proc.ExitCode)) ----"
             # Write-Host keeps the log out of this function's output stream: otherwise the caller
-            # would receive an array ("Kotatsu Lunar 0.1.0", 0) instead of the exit code.
+            # would receive an array ("Kotatsu Lunar 0.2.0", 0) instead of the exit code.
             if (Test-Path $Log) { Write-Host ((Get-Content $Log) -join "`n") }
             if (Test-Path "$Log.err") { Write-Host ((Get-Content "$Log.err") -join "`n") }
             return [int]$proc.ExitCode

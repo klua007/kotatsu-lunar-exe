@@ -20,7 +20,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT/build}"
 KOTLINC="${KOTLINC:-${KOTLINC_HOME:-}/bin/kotlinc}"
-APP_VERSION="0.1.0"
+APP_VERSION="0.2.0"
 JAR_NAME="kotatsu-lunar.jar"
 MAIN_CLASS="org.koitharu.kotatsu.desktop.MainKt"
 TEST_CLASS="org.koitharu.kotatsu.desktop.test.TestSuiteKt"
