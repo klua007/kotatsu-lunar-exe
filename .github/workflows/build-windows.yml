@@ -1,0 +1,409 @@
+name: Build Windows desktop app
+
+# Builds the Kotatsu Lunar desktop port on a real Windows machine: compiles, runs the test suite,
+# produces the self-contained jar, the native .exe launcher (jpackage app-image), the portable .zip
+# and — when the WiX toolset is available — the .msi installer. Artifacts are attached to the run and
+# to a GitHub Release when a v* tag is pushed.
+#
+# The steps mirror scripts/build-windows.ps1 but are split so that a failure is attributable from the
+# job summary (Actions API) alone, without downloading the raw log.
+#
+# It does not touch the Android application in app/; that one keeps its upstream build.
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  KOTLIN_VERSION: '2.1.21'
+  # APP_VERSION is *not* set here: it is read from desktop/.../core/BuildInfo.kt by the
+  # "Resolve application version" step, so a release can never ship an artefact whose installer,
+  # .exe and jar disagree with the compiled code.
+
+jobs:
+  windows:
+    name: Build (windows-latest, x64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve application version
+        run: |
+          $file = "desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt"
+          $match = Select-String -Path $file -Pattern 'const val APP_VERSION = "([0-9][0-9A-Za-z.+-]*)"' |
+            Select-Object -First 1
+          if (-not $match) { throw "APP_VERSION not found in $file" }
+          $version = $match.Matches[0].Groups[1].Value
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "APP_VERSION=$version (read from $file)"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          java-package: jdk
+
+      - name: Install WiX toolset (for the .msi)
+        continue-on-error: true
+        run: |
+          $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*" -Directory -ErrorAction SilentlyContinue
+          if (-not $wix) { choco install wixtoolset --no-progress -y }
+
+      - name: Download Kotlin compiler
+        run: |
+          $url = "https://github.com/JetBrains/kotlin/releases/download/v$env:KOTLIN_VERSION/kotlin-compiler-$env:KOTLIN_VERSION.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\kotlin.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\kotlin.zip" -DestinationPath "$env:RUNNER_TEMP\kotlin" -Force
+          "KOTLINC_HOME=$env:RUNNER_TEMP\kotlin\kotlinc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem "$env:RUNNER_TEMP\kotlin\kotlinc\bin\kotlinc.bat"
+
+      - name: Show toolchain
+        run: |
+          Write-Host "java: $((& java -version 2>&1) -join ' ')"; Write-Host "JAVA_HOME=$env:JAVA_HOME"
+          Write-Host "KOTLINC_HOME=$env:KOTLINC_HOME"
+          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -version
+
+      - name: Compile desktop sources
+        run: |
+          New-Item -ItemType Directory -Force -Path build\classes\main | Out-Null
+          $src = Get-ChildItem desktop\src\main\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          Write-Host "compiling $($src.Count) files"
+          & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn -d build\classes\main @src
+          if ($LASTEXITCODE -ne 0) { throw "kotlinc failed with exit code $LASTEXITCODE" }
+          Get-ChildItem build\classes\main -Recurse -Filter *.class | Measure-Object | Select-Object -ExpandProperty Count
+
+      - name: Run test suite
+        run: |
+          New-Item -ItemType Directory -Force -Path build\classes\test | Out-Null
+          $main = (Resolve-Path build\classes\main).Path
+          $test = (Resolve-Path build\classes\test).Path
+          $stdlib = Join-Path $env:KOTLINC_HOME "lib\kotlin-stdlib.jar"
+          if (-not (Test-Path $stdlib)) { throw "kotlin-stdlib.jar not found at $stdlib" }
+          $src = Get-ChildItem desktop\src\test\kotlin -Recurse -Filter *.kt | ForEach-Object { $_.FullName }
+          try {
+            & "$env:KOTLINC_HOME\bin\kotlinc.bat" -jvm-target 17 -nowarn "-Xfriend-paths=$main" -classpath $main -d $test @src 2>&1 |
+              Tee-Object -FilePath build\test-compile.log
+            if ($LASTEXITCODE -ne 0) { throw "test compilation failed with exit code $LASTEXITCODE" }
+
+            & java "-Dkotatsu.test=1" "-Djava.awt.headless=true" -cp "$main;$test;$stdlib" org.koitharu.kotatsu.desktop.test.TestSuiteKt 2>&1 |
+              Tee-Object -FilePath build\test-output.log
+            if ($LASTEXITCODE -ne 0) { throw "tests failed with exit code $LASTEXITCODE" }
+          }
+          catch {
+            # The raw log is not always reachable from outside; annotations are (Actions API).
+            Write-Host "::error title=Desktop test suite::$($_.Exception.Message)"
+            foreach ($log in @("build\test-output.log", "build\test-compile.log")) {
+              if (Test-Path $log) {
+                Get-Content $log -Tail 20 | Where-Object { $_ -match '\S' } | ForEach-Object {
+                  Write-Host "::error file=$log::$($_.Replace('%','%25').Replace("`r",'').Replace("`n",' '))"
+                }
+              }
+            }
+            throw
+          }
+
+      - name: Build runnable jar
+        run: |
+          New-Item -ItemType Directory -Force -Path build\dist | Out-Null
+          $stage = "build\jar-stage"
+          Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Path "build\classes\main\*" -Destination $stage -Recurse -Force
+
+          $stdlib = Join-Path $env:KOTLINC_HOME "lib\kotlin-stdlib.jar"
+          if (-not (Test-Path $stdlib)) { throw "kotlin-stdlib.jar not found at $stdlib" }
+          $unzipped = "build\stdlib"
+          Remove-Item -Recurse -Force $unzipped -ErrorAction SilentlyContinue
+          Expand-Archive -Path $stdlib -DestinationPath $unzipped -Force
+          Remove-Item -Force "$unzipped\META-INF\MANIFEST.MF" -ErrorAction SilentlyContinue
+          Remove-Item -Force "$unzipped\module-info.class" -ErrorAction SilentlyContinue
+          Copy-Item -Path "$unzipped\*" -Destination $stage -Recurse -Force
+
+          & jar --create --file build\dist\kotatsu-lunar.jar --main-class org.koitharu.kotatsu.desktop.MainKt -C $stage .
+          if ($LASTEXITCODE -ne 0) { throw "jar creation failed" }
+
+      - name: Smoke test the jar
+        run: |
+          $version = & java -jar build\dist\kotatsu-lunar.jar --version
+          if ($LASTEXITCODE -ne 0) { throw "jar --version failed" }
+          Write-Host "jar reports: $version"
+          if ($version.Trim() -ne "Kotatsu Lunar $env:APP_VERSION") {
+            throw "the jar reports '$version' but BuildInfo.kt declares $env:APP_VERSION"
+          }
+          & java -jar build\dist\kotatsu-lunar.jar --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "jar smoke test failed" }
+
+      - name: Package native application (jpackage app-image)
+        run: |
+          $input = "build\jpackage-input"
+          Remove-Item -Recurse -Force $input -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $input | Out-Null
+          Copy-Item build\dist\kotatsu-lunar.jar $input -Force
+          $args = @(
+            "--type", "app-image",
+            "--name", "KotatsuLunar",
+            "--app-version", $env:APP_VERSION,
+            "--vendor", "Kotatsu Lunar (unofficial desktop port)",
+            "--description", "Kotatsu Lunar - unofficial Windows port of Kotatsu-Redo",
+            "--input", $input,
+            "--main-jar", "kotatsu-lunar.jar",
+            "--main-class", "org.koitharu.kotatsu.desktop.MainKt",
+            "--dest", "build\package",
+            "--java-options", "-Xmx1536m",
+            "--java-options", "-Dfile.encoding=UTF-8",
+            "--icon", "desktop\resources\icon.ico"
+          )
+          & jpackage @args
+          if ($LASTEXITCODE -ne 0) { throw "jpackage app-image failed" }
+          if (-not (Test-Path "build\package\KotatsuLunar\KotatsuLunar.exe")) { throw "KotatsuLunar.exe was not produced" }
+
+      - name: Verify the produced .exe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # jpackage builds a GUI-subsystem launcher, so the exit code must be read through
+          # Start-Process; `& $exe` would not wait for it.
+          function Invoke-Launcher {
+            param([string]$Exe, [string]$Arguments, [string]$Log)
+            $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -NoNewWindow -Wait -PassThru `
+              -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
+            Write-Host "---- $Exe $Arguments (exit $($proc.ExitCode)) ----"
+            # Write-Host keeps the log out of this function's output stream: otherwise the caller
+            # would receive an array ("Kotatsu Lunar 0.2.0", 0) instead of the exit code.
+            if (Test-Path $Log) { Write-Host ((Get-Content $Log) -join "`n") }
+            if (Test-Path "$Log.err") { Write-Host ((Get-Content "$Log.err") -join "`n") }
+            return [int]$proc.ExitCode
+          }
+
+          function Report-Failure {
+            param([string]$Title, [string]$Log)
+            Write-Host "::error title=$Title::$Title (see $Log)"
+            foreach ($candidate in @($Log, "$Log.err")) {
+              if (Test-Path $candidate) {
+                Get-Content $candidate -Tail 25 | Where-Object { $_ -match '\S' } | ForEach-Object {
+                  $line = $_.Replace('%', '%25')
+                  Write-Host "::error file=$candidate::$line"
+                }
+              }
+            }
+          }
+
+          try {
+            $exe = "build\package\KotatsuLunar\KotatsuLunar.exe"
+            Get-Item $exe | Select-Object FullName, Length | Format-List
+            $versionCode = Invoke-Launcher $exe "--version" "build\exe-version.log"
+            if ($versionCode -ne 0) {
+              Report-Failure "Packaged launcher: --version failed" "build\exe-version.log"
+              throw ".exe --version exited with $versionCode"
+            }
+            # The launcher is built by jpackage with --app-version; it must print the version that
+            # BuildInfo.kt actually declares, otherwise the installer name would lie.
+            $reported = (Get-Content "build\exe-version.log" -ErrorAction SilentlyContinue |
+              Where-Object { $_ -match 'Kotatsu Lunar' } | Select-Object -First 1)
+            if (-not $reported -or $reported.Trim() -ne "Kotatsu Lunar $env:APP_VERSION") {
+              Report-Failure "Packaged launcher: version mismatch" "build\exe-version.log"
+              throw ".exe reports '$reported' but BuildInfo.kt declares $env:APP_VERSION"
+            }
+            Write-Host "launcher reports: $reported"
+            $smokeCode = Invoke-Launcher $exe "--smoke-test" "build\exe-smoke.log"
+            if ($smokeCode -ne 0) {
+              Report-Failure "Packaged launcher: smoke test failed" "build\exe-smoke.log"
+              throw ".exe smoke test exited with $smokeCode"
+            }
+          }
+          catch {
+            Write-Host "::error title=Verify launcher step::$($_.Exception.Message)"
+            throw
+          }
+
+      - name: Build portable package and MSI
+        run: |
+          $appImage = "build\package\KotatsuLunar"
+          foreach ($doc in @("README.md", "LICENSE", "NOTICE.md")) {
+            if (Test-Path $doc) { Copy-Item $doc $appImage -Force }
+          }
+          $zip = "build\dist\KotatsuLunar-$env:APP_VERSION-windows-x64-portable.zip"
+          Remove-Item -Force $zip -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$appImage\*" -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "portable: $zip ($((Get-Item $zip).Length) bytes)"
+
+          $wix = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*" -Directory -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $wix) {
+            Write-Host "::warning::WiX not found, skipping the MSI installer"
+            return
+          }
+          $env:PATH = (Join-Path $wix.FullName "bin") + ";" + $env:PATH
+          $args = @(
+            "--type", "msi",
+            "--name", "KotatsuLunar",
+            "--app-version", $env:APP_VERSION,
+            "--vendor", "Kotatsu Lunar (unofficial desktop port)",
+            "--description", "Kotatsu Lunar - unofficial Windows port of Kotatsu-Redo",
+            "--input", "build\jpackage-input",
+            "--main-jar", "kotatsu-lunar.jar",
+            "--main-class", "org.koitharu.kotatsu.desktop.MainKt",
+            "--dest", "build\dist",
+            "--java-options", "-Xmx1536m",
+            "--java-options", "-Dfile.encoding=UTF-8",
+            "--icon", "desktop\resources\icon.ico",
+            "--win-menu", "--win-shortcut", "--win-dir-chooser", "--win-per-user-install"
+          )
+          & jpackage @args
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::MSI creation failed; the portable zip is still available" }
+
+      - name: Diagnostics (logs in the job summary)
+        if: always()
+        run: |
+          $summary = $env:GITHUB_STEP_SUMMARY
+          "## Build diagnostics" | Out-File -Append -FilePath $summary
+          foreach ($log in @("build\test-output.log", "build\exe-version.log", "build\exe-version.log.err", "build\exe-smoke.log", "build\exe-smoke.log.err")) {
+            if (Test-Path $log) {
+              "### $log (tail)" | Out-File -Append -FilePath $summary
+              "``````" | Out-File -Append -FilePath $summary
+              Get-Content $log -Tail 80 | Out-File -Append -FilePath $summary
+              "``````" | Out-File -Append -FilePath $summary
+            }
+          }
+
+      - name: Show artifacts
+        if: always()
+        run: Get-ChildItem -Recurse build\dist -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Upload Windows portable package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotatsu-lunar-windows-x64-portable
+          path: build/dist/*-windows-x64-portable.zip
+          if-no-files-found: error
+
+      - name: Upload jar
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotatsu-lunar-jar
+          path: build/dist/kotatsu-lunar.jar
+          if-no-files-found: error
+
+      - name: Upload MSI installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotatsu-lunar-windows-x64-msi
+          path: build/dist/*.msi
+          if-no-files-found: warn
+
+  # Read-only smoke test against the live public API. It is informational (never blocks the
+  # build): a MangaDex outage must not turn a green build red, but a change of the API must be
+  # visible in the job summary the same day.
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/dist/*-windows-x64-portable.zip
+            build/dist/*.msi
+            build/dist/kotatsu-lunar.jar
+          body: |
+            Kotatsu Lunar ${{ github.ref_name }} — unofficial Windows desktop port of Kotatsu-Redo.
+
+            * `KotatsuLunar-*-windows-x64-portable.zip` — unzip and run `KotatsuLunar.exe` (no installation).
+            * `KotatsuLunar-*.msi` — Windows installer (when built).
+            * `kotatsu-lunar.jar` — runnable jar (`java -jar`), requires Java 17+.
+
+            Licensed under GPL-3.0-or-later. Credits and limitations: see README.md and NOTICE.md.
+
+  mangadex-live-check:
+    name: MangaDex read-only check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run the read-only check
+        run: |
+          python3 scripts/check_mangadex.py | tee mangadex-check.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "## MangaDex read-only check"
+            echo
+            echo '```'
+            cat mangadex-check.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the report on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- mangadex-readonly-check -->';
+            const report = fs.existsSync('mangadex-check.txt')
+              ? fs.readFileSync('mangadex-check.txt', 'utf8').trim()
+              : '(no report produced)';
+            const { owner, repo } = context.repo;
+            let number = context.payload.pull_request ? context.payload.pull_request.number : null;
+            if (!number) {
+              const head = `${owner}:${context.ref.replace('refs/heads/', '')}`;
+              const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head });
+              number = prs.data.length ? prs.data[0].number : null;
+            }
+            if (!number) {
+              core.info('no pull request for this ref; the report stays in the job summary');
+              return;
+            }
+            const body = [
+              marker,
+              '## MangaDex read-only check',
+              '',
+              '`scripts/check_mangadex.py` against the live API — GET only, no credentials.',
+              '',
+              '```', report, '```',
+              '',
+              `Run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            const existing = comments.data.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            }
+            core.info(`report posted to pull request #${number}`);
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangadex-readonly-check
+          path: mangadex-check.txt
+          if-no-files-found: warn
