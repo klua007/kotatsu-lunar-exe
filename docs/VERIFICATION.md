@@ -78,6 +78,10 @@ Additional checks (150-case suite):
 
 ## 2. Windows verification (executed)
 
+Tag `v0.2.1` points at the merge commit of the branch behind PR #1, so the run that produced the
+release artifacts is the same code that the release ships: run
+<https://github.com/klua007/kotatsu-lunar-exe/actions/runs/40427924061>.
+
 The workflow `.github/workflows/build-windows.yml` runs on `windows-latest`. It has been executed on
 this repository and **passes**:
 
@@ -92,6 +96,7 @@ this repository and **passes**:
 | **Verify the produced `.exe`** (`KotatsuLunar.exe --version` asserted against `BuildInfo.kt`, and `--smoke-test`, exit code checked) | passed |
 | Build portable `.zip` and `.msi` | passed |
 | Upload artifacts | `kotatsu-lunar-windows-x64-portable`, `kotatsu-lunar-jar`, `kotatsu-lunar-windows-x64-msi` (all named after the resolved version) |
+| Release for the `v0.2.1` tag | created with `kotatsu-lunar.jar` (2,439,934 B), `KotatsuLunar-0.2.1-windows-x64-portable.zip` (51,936,506 B) and `KotatsuLunar-0.2.1.msi` (52,543,321 B) |
 | `MangaDex read-only check` job (live API, GET only, non-blocking) | passed — 11/11 checks; report uploaded as `mangadex-readonly-check` and commented on the pull request |
 
 So, on Windows: the application **compiles, its tests pass, the packaged `KotatsuLunar.exe` starts,
