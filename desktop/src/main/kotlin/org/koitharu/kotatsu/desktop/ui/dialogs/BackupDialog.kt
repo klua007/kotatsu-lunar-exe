@@ -93,14 +93,11 @@ object BackupDialog {
 			append(tr(K.BACKUP_WARNING)).append("\n")
 			append(tr(K.BACKUP_DOWNLOADS_NOTE))
 		}
-		val area = JTextArea(text).apply {
+		val area = Ui.textArea(text).apply {
 			isEditable = false
 			font = Theme.fontMono
-			background = Theme.surface
-			foreground = Theme.onBackground
 			lineWrap = true
 			wrapStyleWord = true
-			border = javax.swing.BorderFactory.createEmptyBorder(10, 10, 10, 10)
 		}
 		val scroll = JScrollPane(area).apply {
 			preferredSize = Dimension(560, 340)

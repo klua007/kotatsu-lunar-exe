@@ -22,6 +22,7 @@ import org.koitharu.kotatsu.desktop.sources.SearchFilters
 import org.koitharu.kotatsu.desktop.sources.SourceEntry
 import org.koitharu.kotatsu.desktop.sources.SourceKind
 import org.koitharu.kotatsu.desktop.sources.SourceOutcome
+import org.koitharu.kotatsu.desktop.sources.mangadex.MangaDexSource
 import org.koitharu.kotatsu.desktop.ui.Async
 import org.koitharu.kotatsu.desktop.ui.Navigator
 import org.koitharu.kotatsu.desktop.ui.Screen
@@ -58,35 +59,18 @@ class HubPanel(
 	private val navigator: Navigator,
 ) : JPanel(BorderLayout()), Screen {
 
-	private val queryField = JTextField().apply {
-		font = Theme.baseFont
-		background = Theme.surfaceVariant
-		foreground = Theme.onBackground
-		caretColor = Theme.onBackground
-		border = BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(Theme.border),
-			BorderFactory.createEmptyBorder(6, 8, 6, 8),
-		)
-		toolTipText = tr(K.HUB_SEARCH_HINT)
-		addActionListener { search() }
-	}
-	private val tagsField = JTextField().apply {
-		font = Theme.baseFont
-		background = Theme.surfaceVariant
-		foreground = Theme.onBackground
-		caretColor = Theme.onBackground
-		border = BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(Theme.border),
-			BorderFactory.createEmptyBorder(6, 8, 6, 8),
-		)
-		toolTipText = tr(K.HUB_FILTER_TAGS)
-	}
-	private val nsfwCheck = JCheckBox(tr(K.HUB_FILTER_NSFW)).apply {
-		background = Theme.background
-		foreground = Theme.onBackground
-		font = Theme.fontSmall
-		isOpaque = false
-	}
+	private val queryField = Ui.textField(tr(K.HUB_SEARCH_HINT)) { search() }
+	private val tagsField = Ui.textField(tr(K.HUB_FILTER_TAGS))
+	private val nsfwCheck = Ui.checkBox(tr(K.HUB_FILTER_NSFW))
+	private val stateBox = Ui.comboBox(
+		listOf(
+			tr(K.HUB_STATE_ANY),
+			tr(K.HUB_STATE_ONGOING),
+			tr(K.HUB_STATE_COMPLETED),
+			tr(K.HUB_STATE_HIATUS),
+			tr(K.HUB_STATE_CANCELLED),
+		),
+	)
 	private val statusLabel = Ui.label("", Theme.fontSmall, Theme.onSurfaceVariant)
 	private val failuresLabel = Ui.label("", Theme.fontSmall, Theme.error)
 	private val sourcesColumn = JPanel().apply {
@@ -107,7 +91,6 @@ class HubPanel(
 		layout = BoxLayout(this, BoxLayout.Y_AXIS)
 		background = Theme.background
 		border = BorderFactory.createEmptyBorder(40, 20, 20, 20)
-		add(Ui.label(tr(K.HUB_NO_RESULTS), Theme.fontSmall, Theme.onSurfaceVariant).apply { alignmentX = CENTER_ALIGNMENT })
 	}
 
 	private var results: List<RemoteManga> = emptyList()
@@ -115,6 +98,7 @@ class HubPanel(
 	private var lastQuery: String = ""
 	private var searchInFlight = false
 	private var autoLoaded = false
+	private var hasMorePages: Boolean = false
 
 	init {
 		background = Theme.background
@@ -175,10 +159,15 @@ class HubPanel(
 				add(fieldCaption(tr(K.HUB_FILTER_TAGS)))
 				tagsField.preferredSize = Dimension(150, 30)
 				add(tagsField)
+				add(fieldCaption(tr(K.HUB_FILTER_STATE)))
+				stateBox.preferredSize = Dimension(140, 30)
+				add(stateBox)
 				add(Ui.button(tr(K.HUB_FILTER_APPLY)) { search() })
 				add(Ui.button(tr(K.HUB_FILTER_CLEAR)) {
 					tagsField.text = ""
 					nsfwCheck.isSelected = false
+					stateBox.selectedIndex = 0
+					search()
 				})
 				add(nsfwCheck)
 			},
@@ -383,10 +372,21 @@ class HubPanel(
 	}
 
 	private fun checkSource(id: String) {
+		val title = repo.registry.get(id)?.descriptor?.title ?: id
 		statusLabel.text = tr(K.APP_LOADING)
-		Async.compute({ repo.registry.checkAvailability(id) }) { _ ->
+		Async.compute({ repo.registry.checkAvailability(id) }) { outcome ->
 			statusLabel.text = tr(K.APP_READY)
 			refreshSources()
+			// An unreachable source is not an error of the application: the card shows why, and a
+			// dialog spells the reason out instead of leaving a silent red badge.
+			if (outcome is SourceOutcome.Failure) {
+				Ui.showError(this, tr(K.HUB_CHECK_FAILED).format(title, outcome.failure.message()))
+			} else if (outcome is SourceOutcome.Success && !outcome.value.available) {
+				Ui.showError(
+					this,
+					tr(K.HUB_CHECK_FAILED).format(title, outcome.value.failure?.message() ?: tr(K.HUB_UNAVAILABLE)),
+				)
+			}
 		}
 	}
 
@@ -399,9 +399,19 @@ class HubPanel(
 			return
 		}
 		statusLabel.text = tr(K.APP_LOADING)
-		Async.compute({ ids.forEach { repo.registry.checkAvailability(it) } }) {
+		Async.compute({ ids.associateWith { repo.registry.checkAvailability(it) } }) { results ->
 			statusLabel.text = tr(K.APP_READY)
 			refreshSources()
+			val down = results.mapNotNull { (id, outcome) ->
+				val failure = when (outcome) {
+					is SourceOutcome.Failure -> outcome.failure
+					is SourceOutcome.Success -> outcome.value.takeIf { !it.available }?.failure
+				} ?: return@mapNotNull null
+				"${repo.registry.get(id)?.descriptor?.title ?: id}: ${failure.message()}"
+			}
+			if (down.isNotEmpty()) {
+				failuresLabel.text = tr(K.HUB_FAILURES).format(down.joinToString("; "))
+			}
 		}
 	}
 
@@ -461,8 +471,21 @@ class HubPanel(
 
 	private fun currentFilters(): SearchFilters = SearchFilters(
 		tags = tagsField.text.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+		states = selectedStates(),
 		includeNsfw = nsfwCheck.isSelected,
 	)
+
+	/**
+	 * Publication status chosen in the Hub, mapped to the values the source understands. The
+	 * MangaDex API wants `status[]=ongoing|completed|hiatus|cancelled`; sending a plain string
+	 * used to be rejected with HTTP 400, which is why the mapping lives next to the source's own
+	 * list ([MangaDexSource.STATES]) instead of being invented here.
+	 */
+	private fun selectedStates(): List<String> {
+		val index = stateBox.selectedIndex
+		val states = MangaDexSource.STATES
+		return if (index <= 0 || index > states.size) emptyList() else listOf(states[index - 1])
+	}
 
 	private fun search() {
 		runSearch(queryField.text.trim(), reset = true)
@@ -486,37 +509,75 @@ class HubPanel(
 		}
 		searchInFlight = true
 		val page = if (reset) 0 else nextPage
+		lastQuery = query
 		statusLabel.text = tr(K.HUB_SEARCHING)
 		failuresLabel.text = ""
-		Async.compute({
-			repo.searchRemote(query, page, currentFilters())
-		}) { outcome ->
+		loadMoreButton.isEnabled = false
+		var filters = SearchFilters()
+		Async.compute(
+			work = {
+				filters = currentFilters()
+				repo.searchRemote(query, page, filters)
+			},
+			onError = { error ->
+				searchInFlight = false
+				loadMoreButton.isEnabled = true
+				statusLabel.text = tr(K.APP_READY)
+				Ui.showError(this, tr(K.ERROR_UNEXPECTED).format(error.message ?: error.javaClass.simpleName))
+			},
+		) { outcome ->
 			searchInFlight = false
-			statusLabel.text = tr(K.HUB_RESULTS_COUNT).format(outcome.items.size)
-			lastQuery = query
-			nextPage = page + 1
-			results = if (reset) outcome.items else results + outcome.items
+			loadMoreButton.isEnabled = true
+			val items = outcome.items
+			// Only advance the page cursor when the request really produced a page: otherwise a
+			// failed "load more" would silently skip results.
+			if (items.isNotEmpty()) nextPage = page + 1
+			results = if (reset) items else (results + items).distinctBy { it.sourceId to it.remoteId }
+			hasMorePages = items.isNotEmpty()
+			statusLabel.text = tr(K.HUB_RESULTS_COUNT).format(results.size)
 			renderResults()
-			loadMoreButton.isVisible = outcome.items.isNotEmpty()
-			failuresLabel.text = if (outcome.failures.isEmpty()) {
-				""
-			} else {
-				tr(K.HUB_FAILURES).format(
-					outcome.failures.joinToString("; ") { (name, failure) -> "$name: ${failure.message()}" },
-				)
+			loadMoreButton.isVisible = hasMorePages
+			failuresLabel.text = buildString {
+				if (!hasMorePages && !reset && items.isEmpty()) append(tr(K.HUB_NO_MORE_PAGES))
+				if (outcome.failures.isNotEmpty()) {
+					if (isNotEmpty()) append(" · ")
+					append(
+						tr(K.HUB_FAILURES).format(
+							outcome.failures.joinToString("; ") { (name, failure) -> "$name: ${failure.message()}" },
+						),
+					)
+				}
 			}
 		}
 	}
 
+	/**
+	 * Replaces the results with an explanatory empty state. A new installation legitimately has an
+	 * empty library and nothing to search yet, so the state always offers the two ways to add
+	 * content: importing local files, or enabling a source on the left.
+	 */
 	private fun clearResults(message: String) {
 		results = emptyList()
+		hasMorePages = false
+		loadMoreButton.isVisible = false
 		resultsGrid.removeAll()
-		val label = JLabel("<html><body style='width:320px'>$message</body></html>").apply {
-			font = Theme.fontSmall
-			foreground = Theme.onSurfaceVariant
-		}
 		resultsGrid.layout = BorderLayout()
-		resultsGrid.add(label, BorderLayout.NORTH)
+		emptyState.removeAll()
+		emptyState.add(
+			JLabel("<html><body style='width:360px'>$message</body></html>").apply {
+				font = Theme.fontSmall
+				foreground = Theme.onSurfaceVariant
+				alignmentX = CENTER_ALIGNMENT
+			},
+		)
+		emptyState.add(Ui.vgap(12))
+		emptyState.add(
+			Ui.accentButton(tr(K.MENU_FILE_OPEN_ARCHIVE)) { navigator.importLocalFiles() }
+				.apply { alignmentX = CENTER_ALIGNMENT },
+		)
+		emptyState.add(Ui.vgap(6))
+		emptyState.add(Ui.button(tr(K.HUB_SOURCES)) { refreshSources() }.apply { alignmentX = CENTER_ALIGNMENT })
+		resultsGrid.add(emptyState, BorderLayout.NORTH)
 		resultsGrid.revalidate()
 		resultsGrid.repaint()
 		statusLabel.text = ""

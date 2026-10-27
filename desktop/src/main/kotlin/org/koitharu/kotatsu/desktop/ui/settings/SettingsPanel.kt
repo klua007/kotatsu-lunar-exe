@@ -27,14 +27,10 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.nio.file.Files
 import javax.swing.BorderFactory
-import javax.swing.Box
 import javax.swing.BoxLayout
-import javax.swing.JCheckBox
-import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
-import javax.swing.JSpinner
 import javax.swing.SpinnerNumberModel
 
 class SettingsPanel(
@@ -66,7 +62,7 @@ class SettingsPanel(
 
 		// Appearance
 		content.add(section(tr(K.SETTINGS_APPEARANCE)))
-		val languageBox = JComboBox(AppLanguage.entries.toTypedArray()).apply {
+		val languageBox = Ui.comboBox(AppLanguage.entries.toList()).apply {
 			selectedItem = I18n.language
 			renderer = javax.swing.DefaultListCellRenderer().let { renderer -> renderer }
 			addActionListener {
@@ -77,21 +73,32 @@ class SettingsPanel(
 			}
 		}
 		content.add(row(tr(K.SETTINGS_LANGUAGE), languageBox))
-		val themeBox = JComboBox(ThemeMode.entries.toTypedArray()).apply {
+		val themeBox = Ui.comboBox(ThemeMode.entries.toList()).apply {
 			selectedItem = repo.settings.theme
 			addActionListener {
 				val mode = selectedItem as? ThemeMode ?: return@addActionListener
 				repo.settings.theme = mode
-				Theme.set(mode)
-				Ui.showInfo(this@SettingsPanel, "Restart the application to fully apply the theme.")
+				Theme.set(mode, repo.settings.uiScale)
+				navigator.applyTheme()
 			}
 		}
 		content.add(row(tr(K.SETTINGS_THEME), themeBox))
+		val scaleBox = Ui.comboBox(UiScaleChoice.entries.toList()).apply {
+			selectedItem = UiScaleChoice.closestTo(repo.settings.uiScale)
+			renderer = javax.swing.DefaultListCellRenderer()
+			addActionListener {
+				val choice = selectedItem as? UiScaleChoice ?: return@addActionListener
+				repo.settings.uiScale = choice.scale
+				Theme.set(repo.settings.theme, choice.scale)
+				navigator.applyTheme()
+			}
+		}
+		content.add(row(tr(K.SETTINGS_UI_SCALE), scaleBox))
 
 		// Reader
 		content.add(Ui.vgap(8))
 		content.add(section(tr(K.SETTINGS_READER)))
-		val modeBox = JComboBox(ReaderMode.entries.toTypedArray()).apply {
+		val modeBox = Ui.comboBox(ReaderMode.entries.toList()).apply {
 			selectedItem = repo.settings.defaultReaderMode
 			renderer = ReaderModeRenderer()
 			addActionListener {
@@ -100,7 +107,7 @@ class SettingsPanel(
 			}
 		}
 		content.add(row(tr(K.SETTINGS_READER_DEFAULT_MODE), modeBox))
-		val backgroundBox = JComboBox(ReaderBackground.entries.toTypedArray()).apply {
+		val backgroundBox = Ui.comboBox(ReaderBackground.entries.toList()).apply {
 			selectedItem = repo.settings.readerBackground
 			addActionListener {
 				val value = selectedItem as? ReaderBackground ?: return@addActionListener
@@ -108,7 +115,7 @@ class SettingsPanel(
 			}
 		}
 		content.add(row(tr(K.READER_BACKGROUND), backgroundBox))
-		val gapSpinner = JSpinner(SpinnerNumberModel(repo.settings.readerPageGap, 0, 96, 4)).apply {
+		val gapSpinner = Ui.spinner(SpinnerNumberModel(repo.settings.readerPageGap, 0, 96, 4)).apply {
 			preferredSize = Dimension(80, 28)
 			addChangeListener { repo.settings.readerPageGap = (value as Number).toInt() }
 		}
@@ -226,13 +233,7 @@ class SettingsPanel(
 			background = Theme.background
 			maximumSize = Dimension(640, 30)
 			alignmentX = LEFT_ALIGNMENT
-			val checkBox = JCheckBox(label, selected).apply {
-				background = Theme.background
-				foreground = Theme.onBackground
-				font = Theme.baseFont
-				isFocusPainted = false
-				addActionListener { onChange(isSelected) }
-			}
+			val checkBox = Ui.checkBox(label, selected, onChange)
 			add(checkBox, BorderLayout.WEST)
 		}
 
@@ -317,4 +318,25 @@ class SettingsPanel(
 	}
 }
 
-private val unusedBox: Box = Box.createHorizontalBox()
+/**
+ * Interface scale steps. The value is the factor applied to every font of the application, which
+ * is how the UI stays readable on a 4K screen or on a Windows display with a scaling factor.
+ */
+enum class UiScaleChoice(val scale: Float, val label: String) {
+
+	SCALE_100(1.0f, "100 %"),
+	SCALE_125(1.25f, "125 %"),
+	SCALE_150(1.5f, "150 %"),
+	SCALE_175(1.75f, "175 %"),
+	SCALE_200(2.0f, "200 %"),
+	;
+
+	override fun toString(): String = label
+
+	companion object {
+
+		/** Nearest step for a stored (or imported) scale. */
+		fun closestTo(scale: Float): UiScaleChoice =
+			entries.minByOrNull { kotlin.math.abs(it.scale - scale) } ?: SCALE_100
+	}
+}

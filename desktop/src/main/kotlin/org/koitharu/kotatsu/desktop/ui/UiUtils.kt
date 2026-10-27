@@ -8,28 +8,46 @@ import org.koitharu.kotatsu.desktop.core.Log
 import org.koitharu.kotatsu.desktop.core.i18n.I18n
 import org.koitharu.kotatsu.desktop.core.i18n.K
 import org.koitharu.kotatsu.desktop.core.i18n.tr
+import java.awt.BasicStroke
+import java.awt.Color
 import java.awt.Component
 import java.awt.Container
 import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Insets
 import java.awt.LayoutManager
+import java.awt.RenderingHints
 import java.awt.event.ActionEvent
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.swing.AbstractAction
 import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.DefaultComboBoxModel
+import javax.swing.DefaultListCellRenderer
 import javax.swing.JButton
+import javax.swing.JCheckBox
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JFileChooser
 import javax.swing.JLabel
+import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JSpinner
+import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
+import javax.swing.UIManager
+import javax.swing.border.Border
 import javax.swing.filechooser.FileNameExtensionFilter
 
 /** Runs blocking work off the EDT and returns results on it. */
@@ -130,7 +148,95 @@ class WrapLayout(
 	}
 }
 
+/**
+ * Border that draws a resting outline and a high-contrast keyboard focus ring.
+ *
+ * `isFocusPainted` is turned off on every themed control because the Look and Feel paints its own
+ * ring in a colour we do not control; this border replaces it with one that is always at least
+ * 3:1 against the surface around the control (verified by `ThemeTests`).
+ */
+/** Swing defaults of the filled primary button, published by `Theme.applyUiDefaults()`. */
+const val ACCENT_BUTTON_BACKGROUND = "Kotatsu.accentButton.background"
+const val ACCENT_BUTTON_FOREGROUND = "Kotatsu.accentButton.foreground"
+
+class FocusBorder(
+	private val resting: () -> Color? = { null },
+	private val focused: () -> Color = { Theme.focus },
+	private val padding: Insets = Insets(4, 12, 4, 12),
+	private val thickness: Int = 1,
+	private val focusThickness: Int = 2,
+	private val arc: Int = 8,
+) : Border {
+
+	private val gap: Int = maxOf(thickness, focusThickness)
+
+	override fun paintBorder(
+		component: Component,
+		graphics: Graphics,
+		x: Int,
+		y: Int,
+		width: Int,
+		height: Int,
+	) {
+		val hasFocus = component.hasFocus() || component is JComponent &&
+			component.getClientProperty(FORCE_FOCUS_PROPERTY) == true
+		val color = if (hasFocus) focused() else resting() ?: return
+		val size = if (hasFocus) focusThickness else thickness
+		val g = graphics.create()
+		if (g is Graphics2D) {
+			g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+			g.stroke = BasicStroke(size.toFloat())
+		}
+		g.color = color
+		val inset = size / 2
+		if (g is Graphics2D && arc > 0) {
+			g.drawRoundRect(x + inset, y + inset, width - size, height - size, arc, arc)
+		} else {
+			g.drawRect(x + inset, y + inset, width - size, height - size)
+		}
+		g.dispose()
+	}
+
+	override fun getBorderInsets(component: Component?): Insets = Insets(
+		padding.top + gap,
+		padding.left + gap,
+		padding.bottom + gap,
+		padding.right + gap,
+	)
+
+	override fun isBorderOpaque(): Boolean = false
+
+	companion object {
+
+		/** Set to `true` to paint the focus ring of a control that does not own the focus yet. */
+		const val FORCE_FOCUS_PROPERTY = "kotatsu.focusRing"
+	}
+}
+
 object Ui {
+
+	/**
+	 * Repaints a control when it gains or loses the keyboard focus, so [FocusBorder] is redrawn.
+	 */
+	fun focusRing(component: JComponent): JComponent = component.apply {
+		addFocusListener(object : FocusAdapter() {
+			override fun focusGained(e: FocusEvent) = component.repaint()
+			override fun focusLost(e: FocusEvent) = component.repaint()
+		})
+	}
+
+	/** Outline + focus ring used by every themed control. */
+	fun controlBorder(
+		resting: () -> Color? = { Theme.outline },
+		padding: Insets = Insets(4, 10, 4, 10),
+	): Border = FocusBorder(resting = resting, focused = { Theme.focus }, padding = padding)
+
+	/**
+	 * Colour of a control, taken from the Swing defaults when the theme is installed so that a
+	 * live theme change repaints it, and from the palette otherwise (headless tests, first paint
+	 * before `Theme.install()`).
+	 */
+	fun themedColor(key: String, fallback: Color): Color = UIManager.getColor(key) ?: fallback
 
 	/**
 	 * Lays out a component and its whole subtree.
@@ -159,33 +265,58 @@ object Ui {
 
 		fun subtitle(text: String): JLabel = label(text, Theme.fontH2)
 
+	/**
+	 * A themed button.
+	 *
+	 * The foreground is derived from the background with [Theme.readableOn], and the control gets
+	 * an explicit border: the surface of a button is only ~1.3:1 against the panel behind it, so
+	 * without the 3:1 outline the control would be invisible even with perfectly readable text.
+	 */
 	fun button(text: String, tooltip: String? = null, action: () -> Unit = {}): JButton =
 		JButton(text).apply {
 			font = Theme.baseFont
-			background = Theme.surfaceVariant
-			foreground = Theme.onBackground
+			background = themedColor("Button.background", Theme.surfaceVariant)
+			foreground = themedColor("Button.foreground", Theme.readableOn(background))
+			isOpaque = true
+			isContentAreaFilled = true
+			// The Look and Feel ring is not themeable; FocusBorder paints ours instead.
 			isFocusPainted = false
+			border = controlBorder()
+			focusRing(this)
 			if (tooltip != null) toolTipText = tooltip
 			addActionListener { action() }
 		}
 
+	/**
+	 * Filled primary button. Uses [Theme.accentSolid] and not the brighter [Theme.accent]: white on
+	 * the bright accent is only ~3:1, white on `accentSolid` is > 5:1.
+	 */
 	fun accentButton(text: String, action: () -> Unit = {}): JButton = button(text, action = action).apply {
-		background = Theme.accent
-		foreground = java.awt.Color.WHITE
+		background = themedColor(ACCENT_BUTTON_BACKGROUND, Theme.accentSolid)
+		foreground = themedColor(
+			ACCENT_BUTTON_FOREGROUND,
+			Theme.readableOn(themedColor(ACCENT_BUTTON_BACKGROUND, Theme.accentSolid)),
+		)
+		border = controlBorder(resting = { null })
 	}
 
-	fun searchField(placeholder: String, onSearch: (String) -> Unit): JTextField =
+	fun textField(placeholder: String = "", onEnter: ((String) -> Unit)? = null): JTextField =
 		JTextField().apply {
 			font = Theme.baseFont
-			background = Theme.surfaceVariant
-			foreground = Theme.onBackground
+			background = themedColor("TextField.background", Theme.surfaceVariant)
+			foreground = themedColor("TextField.foreground", Theme.readableOn(background))
 			caretColor = Theme.onBackground
+			disabledTextColor = themedColor("TextField.inactiveForeground", Theme.onSurfaceDisabled)
+			selectionColor = Theme.selectionBackground
+			selectedTextColor = Theme.selectionForeground
 			toolTipText = placeholder
-			border = BorderFactory.createCompoundBorder(
-				BorderFactory.createLineBorder(Theme.border),
-				BorderFactory.createEmptyBorder(6, 8, 6, 8),
-			)
-			addActionListener { onSearch(text) }
+			border = controlBorder(padding = Insets(4, 6, 4, 6))
+			focusRing(this)
+			if (onEnter != null) addActionListener { onEnter(text) }
+		}
+
+	fun searchField(placeholder: String, onSearch: (String) -> Unit): JTextField =
+		textField(placeholder) { onSearch(it) }.apply {
 			document.addDocumentListener(
 				object : javax.swing.event.DocumentListener {
 					override fun insertUpdate(e: javax.swing.event.DocumentEvent) = onSearch(text)
@@ -194,6 +325,97 @@ object Ui {
 				},
 			)
 		}
+
+	fun checkBox(text: String, selected: Boolean = false, onChange: (Boolean) -> Unit = {}): JCheckBox =
+		JCheckBox(text, selected).apply {
+			font = Theme.baseFont
+			background = themedColor("CheckBox.background", Theme.background)
+			foreground = themedColor("CheckBox.foreground", Theme.onBackground)
+			isOpaque = false
+			isFocusPainted = false
+			border = controlBorder(resting = { null }, padding = Insets(2, 2, 2, 2))
+			focusRing(this)
+			addActionListener { onChange(isSelected) }
+		}
+
+	fun <E> comboBox(model: javax.swing.ComboBoxModel<E>): JComboBox<E> = JComboBox(model).apply {
+		themeComboBox(this)
+	}
+
+	fun <E> comboBox(items: List<E>): JComboBox<E> {
+		val model = DefaultComboBoxModel<E>()
+		items.forEach { model.addElement(it) }
+		return comboBox(model)
+	}
+
+	fun spinner(model: javax.swing.SpinnerModel): JSpinner = JSpinner(model).apply {
+		font = Theme.baseFont
+		background = themedColor("Spinner.background", Theme.surfaceVariant)
+		foreground = themedColor("Spinner.foreground", Theme.readableOn(background))
+		border = controlBorder(padding = Insets(2, 4, 2, 4))
+		focusRing(this)
+		(editor as? JSpinner.DefaultEditor)?.textField?.apply {
+			background = themedColor("TextField.background", Theme.surfaceVariant)
+			foreground = themedColor("TextField.foreground", Theme.readableOn(background))
+			caretColor = Theme.onBackground
+			disabledTextColor = Theme.onSurfaceDisabled
+			selectionColor = Theme.selectionBackground
+			selectedTextColor = Theme.selectionForeground
+			border = BorderFactory.createEmptyBorder(2, 4, 2, 4)
+		}
+		editor?.apply {
+			background = themedColor("Spinner.background", Theme.surfaceVariant)
+			foreground = themedColor("Spinner.foreground", Theme.onBackground)
+		}
+	}
+
+	fun textArea(text: String = ""): JTextArea = JTextArea(text).apply {
+		font = Theme.baseFont
+		background = themedColor("TextArea.background", Theme.surfaceVariant)
+		foreground = themedColor("TextArea.foreground", Theme.readableOn(background))
+		caretColor = Theme.onBackground
+		disabledTextColor = Theme.onSurfaceDisabled
+		selectionColor = Theme.selectionBackground
+		selectedTextColor = Theme.selectionForeground
+		border = controlBorder(padding = Insets(4, 4, 4, 4))
+		focusRing(this)
+	}
+
+	private fun <E> themeComboBox(box: JComboBox<E>) {
+		box.apply {
+			font = Theme.baseFont
+			background = themedColor("ComboBox.background", Theme.surfaceVariant)
+			foreground = themedColor("ComboBox.foreground", Theme.readableOn(background))
+			isOpaque = true
+			border = controlBorder(padding = Insets(3, 6, 3, 4))
+			focusRing(this)
+			setRenderer(object : DefaultListCellRenderer() {
+				override fun getListCellRendererComponent(
+					list: JList<*>?,
+					value: Any?,
+					index: Int,
+					isSelected: Boolean,
+					cellHasFocus: Boolean,
+				): Component = super.getListCellRendererComponent(
+					list, value, index, isSelected, cellHasFocus,
+				).apply {
+					font = Theme.baseFont
+					background = if (isSelected || cellHasFocus) Theme.selectionBackground else Theme.surfaceVariant
+					foreground = if (isSelected || cellHasFocus) Theme.selectionForeground else Theme.onBackground
+					border = BorderFactory.createEmptyBorder(3, 6, 3, 6)
+				}
+			})
+			(editor.editorComponent as? JTextField)?.apply {
+				background = themedColor("ComboBox.background", Theme.surfaceVariant)
+				foreground = themedColor("ComboBox.foreground", Theme.readableOn(background))
+				caretColor = Theme.onBackground
+				disabledTextColor = Theme.onSurfaceDisabled
+				selectionColor = Theme.selectionBackground
+				selectedTextColor = Theme.selectionForeground
+				border = BorderFactory.createEmptyBorder(2, 4, 2, 4)
+			}
+		}
+	}
 
 	fun hbox(vararg components: Component): JPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 6)).apply {
 		background = Theme.background

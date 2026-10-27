@@ -25,12 +25,18 @@ enum class FailureKind {
 	IO,
 }
 
+/**
+ * @param serverMessage human readable explanation returned by the remote API in the response body
+ *   (for example the `errors[].detail` of a MangaDex validation error). It is shown to the user, so
+ *   it must never contain a token, a cookie or any other credential.
+ */
 data class SourceFailure(
 	val kind: FailureKind,
 	val detail: String = "",
 	val httpCode: Int = 0,
 	val retryAfterSeconds: Int = 0,
 	val url: String = "",
+	val serverMessage: String? = null,
 ) {
 
 	/** Translation key describing the failure (never a raw stack trace). */
@@ -47,7 +53,11 @@ data class SourceFailure(
 			FailureKind.IO -> K.SOURCES_ERROR_IO
 		}
 
-	/** Ready-to-show text; [detail] is appended when it adds information. */
+	/**
+	 * Ready-to-show text. [detail] (the local classification, e.g. "HTTP 400") and [serverMessage]
+	 * (what the API answered, e.g. "Error validating /contentRating/3: …") are appended when they
+	 * add information, so a 400 is never reported as a bare, unexplained failure.
+	 */
 	fun message(): String {
 		val base = when (kind) {
 			FailureKind.HTTP_ERROR -> tr(messageKey).format(httpCode)
@@ -58,7 +68,11 @@ data class SourceFailure(
 			}
 			else -> tr(messageKey)
 		}
-		return if (detail.isBlank()) base else "$base ($detail)"
+		val suffix = buildList {
+			if (detail.isNotBlank()) add(detail)
+			serverMessage?.takeIf { it.isNotBlank() }?.let(::add)
+		}.joinToString(" · ")
+		return if (suffix.isEmpty()) base else "$base ($suffix)"
 	}
 
 	companion object {
@@ -69,13 +83,20 @@ data class SourceFailure(
 		fun timeout(url: String, millis: Long) =
 			SourceFailure(FailureKind.TIMEOUT, "after ${millis} ms", url = url)
 
-		fun http(code: Int, url: String, retryAfterSeconds: Int = 0) =
+		fun http(code: Int, url: String, retryAfterSeconds: Int = 0, serverMessage: String? = null) =
 			if (code == 429) {
-				SourceFailure(FailureKind.RATE_LIMITED, "HTTP 429", code, retryAfterSeconds, url)
+				SourceFailure(
+					kind = FailureKind.RATE_LIMITED,
+					detail = "HTTP 429",
+					httpCode = code,
+					retryAfterSeconds = retryAfterSeconds,
+					url = url,
+					serverMessage = serverMessage,
+				)
 			} else if (code == 404) {
-				SourceFailure(FailureKind.NOT_FOUND, "HTTP 404", code, url = url)
+				SourceFailure(FailureKind.NOT_FOUND, "HTTP 404", code, url = url, serverMessage = serverMessage)
 			} else {
-				SourceFailure(FailureKind.HTTP_ERROR, "HTTP $code", code, url = url)
+				SourceFailure(FailureKind.HTTP_ERROR, "HTTP $code", code, url = url, serverMessage = serverMessage)
 			}
 
 		fun invalidResponse(detail: String, url: String = "") =

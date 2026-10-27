@@ -30,6 +30,7 @@ import java.awt.Font
 import java.awt.GridLayout
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
+import java.awt.Insets
 import java.awt.event.KeyEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -51,6 +52,7 @@ import javax.swing.JSeparator
 import javax.swing.KeyStroke
 import javax.swing.SwingConstants
 import javax.swing.TransferHandler
+import javax.swing.SwingUtilities
 import javax.swing.WindowConstants
 
 class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
@@ -172,10 +174,14 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		horizontalAlignment = SwingConstants.LEFT
 		maximumSize = Dimension(180, 34)
 		alignmentX = LEFT_ALIGNMENT
+		// The Look and Feel focus ring is not themeable; Ui.focusRing + a FocusBorder replace it.
 		isFocusPainted = false
 		isContentAreaFilled = false
-		foreground = Theme.onBackground
-		border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
+		isOpaque = true
+		background = Theme.surface
+		foreground = Theme.readableOn(Theme.surface)
+		border = FocusBorder(resting = { null }, focused = { Theme.focus }, padding = Insets(6, 8, 6, 8))
+		Ui.focusRing(this)
 		addActionListener {
 			when (route) {
 				Route.LIBRARY -> showLibrary()
@@ -188,11 +194,17 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		}
 		addMouseListener(object : java.awt.event.MouseAdapter() {
 			override fun mouseEntered(e: java.awt.event.MouseEvent) {
-				if (!isContentAreaFilled) background = Theme.surfaceVariant
+				if (!isContentAreaFilled) {
+					background = Theme.surfaceVariant
+					foreground = Theme.readableOn(Theme.surfaceVariant)
+				}
 			}
 
 			override fun mouseExited(e: java.awt.event.MouseEvent) {
-				if (!isContentAreaFilled) background = Theme.surface
+				if (!isContentAreaFilled) {
+					background = Theme.surface
+					foreground = Theme.readableOn(Theme.surface)
+				}
 			}
 		})
 		navButtons[route] = this
@@ -223,7 +235,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		background = Theme.surface
 		add(
 			JMenu(tr(K.MENU_FILE)).apply {
-				add(menuItem(K.MENU_FILE_OPEN_ARCHIVE, KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK) { importFiles() })
+				add(menuItem(K.MENU_FILE_OPEN_ARCHIVE, KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK) { importLocalFiles() })
 				add(menuItem(K.MENU_FILE_IMPORT_FOLDER) { importFolder() })
 				add(JSeparator())
 				add(menuItem(K.MENU_FILE_BACKUP) { createBackup() })
@@ -289,7 +301,7 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 	private fun installShortcuts() {
 		Ui.registerShortcut(rootPane, KeyEvent.VK_F5, 0) { refreshAll() }
 		Ui.registerShortcut(rootPane, KeyEvent.VK_F11, 0) { toggleFullScreen() }
-		Ui.registerShortcut(rootPane, KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK) { importFiles() }
+		Ui.registerShortcut(rootPane, KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK) { importLocalFiles() }
 		Ui.registerShortcut(rootPane, KeyEvent.VK_F, KeyEvent.CTRL_DOWN_MASK) {
 			if (currentRoute != Route.LIBRARY) showLibrary()
 			libraryPanel.focusSearch()
@@ -380,13 +392,14 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 			val active = r == route
 			button.isContentAreaFilled = active
 			button.background = if (active) Theme.surfaceVariant else Theme.surface
+			button.foreground = Theme.readableOn(button.background)
 		}
 		if (route != Route.DETAILS && route != Route.LIBRARY) detailsPanel.onHidden()
 	}
 
 	// --- Actions ------------------------------------------------------------------------------
 
-	private fun importFiles() {
+	override fun importLocalFiles() {
 		val start = repo.settings.lastImportDirectory?.let { runCatching { Paths.get(it) }.getOrNull() }
 		val paths = Ui.chooseFiles(this, start ?: AppDirs.dataDir)
 		if (paths.isEmpty()) return
@@ -427,10 +440,34 @@ class MainWindow(private val repo: AppRepository) : JFrame(), Navigator {
 		BackupDialog.showImport(this, repo) { refreshAll() }
 	}
 
+	/**
+	 * Applies the theme immediately: the Look and Feel is reinstalled, every component gets its new
+	 * UI delegate, and the panels repaint. Panels that set colours while building their rows are
+	 * refreshed through [refreshAll] so nothing keeps a stale palette.
+	 */
 	private fun changeTheme(mode: ThemeMode) {
 		repo.settings.theme = mode
-		Theme.set(mode)
-		Ui.showInfo(this, "Theme changed to ${mode.name.lowercase()}. Restart the application to fully apply it everywhere.")
+		Theme.set(mode, repo.settings.uiScale)
+		applyThemeToWindow()
+		refreshAll()
+		hubPanel.onShown()
+		settingsPanel.onShown()
+		setStatus(tr(K.APP_READY))
+	}
+
+	/** Rebuilds the UI delegates of this window and repaints it after a theme/scale change. */
+	fun applyThemeToWindow() {
+		contentPane.background = Theme.background
+		background = Theme.background
+		jMenuBar?.apply {
+			background = Theme.surface
+			foreground = Theme.onBackground
+		}
+		SwingUtilities.updateComponentTreeUI(this)
+		SwingUtilities.updateComponentTreeUI(jMenuBar)
+		// updateComponentTreeUI restores the Look and Feel borders, so the themed ones are put back.
+		revalidate()
+		repaint()
 	}
 
 	private fun changeLanguage(language: AppLanguage) {

@@ -161,6 +161,7 @@ internal object Strings {
 		K.SETTINGS_APPEARANCE to row("Appearance", "Aparência"),
 		K.SETTINGS_LANGUAGE to row("Interface language", "Idioma da interface"),
 		K.SETTINGS_THEME to row("Theme", "Tema"),
+		K.SETTINGS_UI_SCALE to row("Interface scale", "Escala da interface"),
 		K.SETTINGS_THEME_DARK to row("Dark", "Escuro"),
 		K.SETTINGS_THEME_LIGHT to row("Light", "Claro"),
 		K.SETTINGS_READER to row("Reader defaults", "Padrões do leitor"),
@@ -333,6 +334,21 @@ internal object Strings {
 		),
 		K.HUB_LANGUAGE to row("Languages", "Idiomas"),
 		K.HUB_SOURCE_UNAVAILABLE_REASON to row("Why: %s", "Motivo: %s"),
+		K.HUB_FILTER_STATE to row("Status", "Situação"),
+		K.HUB_STATE_ANY to row("Any", "Qualquer"),
+		K.HUB_STATE_ONGOING to row("Ongoing", "Em andamento"),
+		K.HUB_STATE_COMPLETED to row("Completed", "Completo"),
+		K.HUB_STATE_HIATUS to row("On hiatus", "Em pausa"),
+		K.HUB_STATE_CANCELLED to row("Cancelled", "Cancelado"),
+		K.HUB_CHECK_FAILED to row(
+			"%s did not answer: %s",
+			"%s não respondeu: %s",
+		),
+		K.HUB_NO_MORE_PAGES to row("No more results", "Sem mais resultados"),
+		K.HUB_ADD_FAILED to row(
+			"Could not add the title to the library: %s",
+			"Não foi possível adicionar o título à biblioteca: %s",
+		),
 
 		K.SOURCES_ERROR_OFFLINE to row(
 			"Network unavailable. Check your connection and try again.",

@@ -20,7 +20,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT/build}"
 KOTLINC="${KOTLINC:-${KOTLINC_HOME:-}/bin/kotlinc}"
-APP_VERSION="0.2.0"
+# The version lives in BuildInfo.kt only; everything else (jar manifest, README, CI) reads it from
+# there so the artefacts can never claim a version that was not compiled.
+BUILD_INFO="$ROOT/desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt"
+APP_VERSION="${APP_VERSION:-$(sed -n 's/.*const val APP_VERSION = "\([0-9][0-9A-Za-z.+-]*\)".*/\1/p' "$BUILD_INFO" | head -1)}"
+if [[ -z "$APP_VERSION" ]]; then
+	echo "error: cannot read APP_VERSION from $BUILD_INFO" >&2
+	exit 1
+fi
 JAR_NAME="kotatsu-lunar.jar"
 MAIN_CLASS="org.koitharu.kotatsu.desktop.MainKt"
 TEST_CLASS="org.koitharu.kotatsu.desktop.test.TestSuiteKt"
@@ -42,6 +49,7 @@ fi
 echo "== Kotatsu Lunar desktop build =="
 echo "kotlinc : $KOTLINC"
 echo "java    : $JAVA"
+echo "version : $APP_VERSION"
 echo "out     : $OUT_DIR"
 
 MAIN_SRC="$ROOT/desktop/src/main/kotlin"

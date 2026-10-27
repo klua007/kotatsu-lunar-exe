@@ -108,6 +108,14 @@ class SettingsStore(file: Path) : PersistentStore(file) {
 		get() = ThemeMode.fromName(string(KEY_THEME)) ?: ThemeMode.DARK
 		set(value) = putRaw(KEY_THEME, stringJson(value.name))
 
+	/**
+	 * Interface scale (1.0 = 100 %). Every font of the application is derived from it, which is
+	 * how the UI stays usable on a 4K screen or on a scaled Windows display.
+	 */
+	var uiScale: Float
+		get() = float(KEY_UI_SCALE, 1f).coerceIn(0.75f, 2.5f)
+		set(value) = putRaw(KEY_UI_SCALE, floatJson(value.coerceIn(0.75f, 2.5f)))
+
 	var defaultReaderMode: ReaderMode
 		get() = ReaderMode.fromName(string(KEY_READER_MODE)) ?: ReaderMode.STANDARD
 		set(value) = putRaw(KEY_READER_MODE, stringJson(value.name))
@@ -171,6 +179,7 @@ class SettingsStore(file: Path) : PersistentStore(file) {
 
 		const val KEY_APP_LANGUAGE = "app_language"
 		const val KEY_THEME = "app_theme"
+		const val KEY_UI_SCALE = "ui_scale"
 		const val KEY_READER_MODE = "reader_mode"
 		const val KEY_READER_BACKGROUND = "reader_background"
 		const val KEY_READER_PAGE_GAP = "reader_page_gap"
@@ -197,6 +206,7 @@ class SettingsStore(file: Path) : PersistentStore(file) {
 		val KNOWN_KEYS = setOf(
 			KEY_APP_LANGUAGE,
 			KEY_THEME,
+			KEY_UI_SCALE,
 			KEY_READER_MODE,
 			KEY_READER_BACKGROUND,
 			KEY_READER_PAGE_GAP,

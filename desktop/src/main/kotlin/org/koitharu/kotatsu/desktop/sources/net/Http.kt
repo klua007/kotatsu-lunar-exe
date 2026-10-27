@@ -11,6 +11,12 @@
 package org.koitharu.kotatsu.desktop.sources.net
 
 import org.koitharu.kotatsu.desktop.core.Log
+import org.koitharu.kotatsu.desktop.core.json.Json
+import org.koitharu.kotatsu.desktop.core.json.arr
+import org.koitharu.kotatsu.desktop.core.json.asObj
+import org.koitharu.kotatsu.desktop.core.json.asStringOrNull
+import org.koitharu.kotatsu.desktop.core.json.obj
+import org.koitharu.kotatsu.desktop.core.json.string
 import java.io.IOException
 import java.net.ConnectException
 import java.net.URI
@@ -36,8 +42,9 @@ data class HttpRequestSpec(
 
 		const val DEFAULT_TIMEOUT_MS = 12_000L
 
-		const val DEFAULT_USER_AGENT: String =
-			"KotatsuLunar/0.2.0 (desktop; +https://github.com/klua007/kotatsu-lunar-exe)"
+		val DEFAULT_USER_AGENT: String =
+			"KotatsuLunar/${org.koitharu.kotatsu.desktop.core.BuildInfo.APP_VERSION} " +
+				"(desktop; +https://github.com/klua007/kotatsu-lunar-exe)"
 	}
 }
 
@@ -200,6 +207,70 @@ class EndpointChooser(
 		const val TAG = "Endpoints"
 	}
 }
+
+/**
+ * Removes credentials from a URL before it is written to a log.
+ *
+ * The sources only ever issue unauthenticated GETs, but a mirror or an OPDS catalogue can be
+ * configured with a URL that carries a token in its query string (and a redirect can add one), so
+ * every URL that reaches [Log] goes through here first.
+ */
+fun redactUrl(url: String): String {
+	val queryStart = url.indexOf('?')
+	if (queryStart < 0) return url
+	val query = url.substring(queryStart + 1)
+	val safe = query.split('&').joinToString("&") { pair ->
+		val separator = pair.indexOf('=')
+		if (separator <= 0) return@joinToString pair
+		val key = pair.substring(0, separator).lowercase()
+		val value = pair.substring(separator + 1)
+		if (SENSITIVE_KEYS.any { key.contains(it) }) "$key=***" else "$key=$value"
+	}
+	return url.substring(0, queryStart + 1) + safe
+}
+
+/**
+ * Best-effort extraction of a human readable message from an error response body.
+ *
+ * MangaDex answers a rejected request with
+ * `{"result":"error","errors":[{"id":"…","status":400,"title":"validation_exception","detail":"…"}]}`,
+ * which says *which parameter* was wrong. Showing that instead of a bare "HTTP 400" is the whole
+ * point, so every source shares this parser. Nothing that looks like a credential is ever kept.
+ */
+fun apiErrorMessage(result: HttpResult, maxLength: Int = 240): String? {
+	val body = result.text()
+	if (body.isBlank()) return null
+	val json = Json.parseOrNull(body) ?: return null
+	val error = json.obj("error")?.let { node ->
+		node.asStringOrNull() ?: node.string("message") ?: node.string("detail")
+	}
+	if (error != null) return sanitizeMessage(error, maxLength)
+	val fromArray = json.arr("errors")?.items.orEmpty().firstNotNullOfOrNull { node ->
+		node.asObj()?.let { it["detail"].asStringOrNull() ?: it["title"].asStringOrNull() }
+			?: node.asStringOrNull()
+	}
+	if (fromArray != null) return sanitizeMessage(fromArray, maxLength)
+	val message = json.string("message") ?: json.string("detail")
+	return message?.let { sanitizeMessage(it, maxLength) }
+}
+
+/**
+ * Shortens and scrubs a server provided message: it is untrusted input that ends up in a dialog
+ * and in the log, so it is trimmed, collapsed to one line and stripped of anything that looks like
+ * a bearer token or a cookie.
+ */
+private fun sanitizeMessage(raw: String, maxLength: Int): String {
+	var text = raw.replace(Regex("(?i)bearer\\s+[A-Za-z0-9._\\-]+"), "bearer ***")
+		.replace(Regex("(?i)(token|key|secret|password|session|cookie)=[^&\\s]+"), "$1=***")
+		.replace(Regex("\\s+"), " ")
+		.trim()
+	if (text.length > maxLength) text = text.take(maxLength - 1).trimEnd() + '…'
+	return text
+}
+
+private val SENSITIVE_KEYS = listOf(
+	"token", "key", "secret", "password", "passwd", "session", "cookie", "auth", "credential",
+)
 
 /** Small helper: absolute URL from a base and a path, tolerant to trailing slashes. */
 fun joinUrl(base: String, path: String): String {

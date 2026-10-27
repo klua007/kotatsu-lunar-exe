@@ -89,7 +89,7 @@ class ReaderFrame internal constructor(
 	private val titleLabel = JLabel("").apply { font = Theme.fontH2; foreground = Theme.onBackground }
 	private val pageLabel = JLabel("").apply { font = Theme.fontSmall; foreground = Theme.onSurfaceVariant }
 	private val statusLabel = JLabel("").apply { font = Theme.fontSmall; foreground = Theme.onSurfaceVariant }
-	private val modeBox = JComboBox(ReaderMode.entries.toTypedArray())
+	private val modeBox = Ui.comboBox(ReaderMode.entries.toList())
 	private val chapterListModel = javax.swing.DefaultListModel<Chapter>()
 	private val chapterList = JList(chapterListModel)
 	private val tocPanel = JPanel(BorderLayout())
