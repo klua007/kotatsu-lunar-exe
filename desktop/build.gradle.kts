@@ -20,8 +20,19 @@ plugins {
 	kotlin("jvm") version "2.1.21"
 }
 
+// The version is declared once, in BuildInfo.kt, and read back here so that `gradle jar`,
+// `jpackage` and the CI workflow all package the version that was actually compiled.
+val appVersionFromFile: String = providers.provider {
+	val buildInfo = file("src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt")
+	Regex("""const val APP_VERSION = "([0-9][0-9A-Za-z.+-]*)"""")
+		.find(buildInfo.readText())
+		?.groupValues
+		?.get(1)
+		?: error("APP_VERSION not found in ${'$'}buildInfo")
+}.get()
+
 group = "org.koitharu.kotatsu.lunar"
-version = "0.2.0"
+version = appVersionFromFile
 
 repositories {
 	mavenCentral()

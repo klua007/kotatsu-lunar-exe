@@ -46,19 +46,109 @@ reported as unavailable, with the reason, in the Hub.
   `GET /at-home/server/{chapterId}`; images from the host returned by `/at-home/server`, covers from
   the public CDN.
 * Works without an account, cookies or JavaScript. No API key.
-* Search by title, adult-content switch, chapter languages (default `en` + `pt-br`), tag filter.
+* Search by title, publication status, adult-content switch, chapter languages (default `en` +
+  `pt-br`), tag filter.
 * `Explore` uses MangaDex's "most followed" ordering, since the API has no popularity endpoint.
-* Chapter feed pages are followed up to 20 × 500 chapters (a self-imposed bound); titles with more
-  chapters get the first 10 000 and the details screen says nothing about the rest — refresh adds the
-  same ordered set again (no duplicates).
 * Alternative base URL: `Hub → MangaDex → Mirror`. Two default bases are tried in order; a base that
   answers 5xx or refuses connections falls through to the next one and stays switched for the
   session. A `404` from the first base is treated as a real answer (no second request).
 * Failure mapping: offline/timeout/HTTP 4xx-5xx/429 (`Retry-After` honoured)/invalid JSON/invalid
-  payload are separate messages in the UI, never a stack trace.
+  payload are separate messages in the UI, never a stack trace. When the API answers with an error
+  body, its own `errors[].detail` is shown next to the message — see 3.3.
 
-Tested against a local server that serves the documented response shapes, including 429, 500, 404,
-delays (timeouts), malformed JSON and a dead port.
+### 3.1 Request contract (this is where 0.2.0 broke)
+
+The API validates query parameters strictly and rejects the *whole* request with HTTP 400 and a body
+like
+
+```json
+{"result":"error","errors":[{"id":"…","status":400,"title":"validation_exception",
+ "detail":"Error validating /contentRating/3: Does not have a value in the enumeration [\"safe\",\"suggestive\",\"erotica\",\"pornographic\"]"}]}
+```
+
+The desktop source inherited two mistakes from the shape used by the Android parser library and both
+were reproduced against the live API while fixing them:
+
+| Parameter | 0.2.0 (broken) | Now | Live answer |
+| --- | --- | --- | --- |
+| `contentRating[]` | `safe`,`suggestive`,`erotica`,**`porn`** | `safe`,`suggestive`,`erotica`,**`pornographic`** | `porn` → **HTTP 400** validation_exception; `pornographic` → 200 |
+| `status` | `status=ongoing` (scalar) | `status[]=ongoing\|completed\|hiatus\|cancelled` | scalar → **HTTP 400** "String value found, but an array is required"; array → 200 |
+
+Because the chapter feed always asks for every content rating, **every** "open details / refresh
+chapters / add to library" request failed with HTTP 400 in 0.2.0, which is the error shown in the
+screenshots that came with the report. Browse and title search kept working (they only send
+`safe`+`suggestive`), which is why results appeared and only the next click failed.
+
+Two more bounds are enforced now rather than being discovered by a 400:
+
+| Rule | Value | Behaviour |
+| --- | --- | --- |
+| `limit` on `/manga` | `<= 100` | clamped (`MAX_PAGE_SIZE`) |
+| `offset + limit` | `<= 10 000` | clamped and the feed pagination stops inside the window (`MAX_RESULT_WINDOW`); the API answers HTTP 400 "Result window is too large" beyond it |
+| feed page size | 500 (feed-specific maximum) | kept, but never past the window |
+
+`MangaDexContractTests` asserts all of the above **on the exact URL the parser builds**, against a
+local server, so it cannot regress silently.
+
+### 3.2 Chapter feed
+
+Chapters are read from `/manga/{id}/feed`, paginated 500 at a time, ordered by volume/chapter,
+filtered by `translatedLanguage[]` (`en`, `pt-br` by default) and with every content rating. The
+pagination stops when a page is empty, when `total` is reached, after 20 pages or when the next
+request would leave the result window; `chaptersComplete` reports whether the list is truncated.
+Chapters with an `externalUrl` (hosted elsewhere) and `isUnavailable` ones are skipped.
+
+### 3.3 Error reporting
+
+Every non-2xx answer is parsed for a message (`errors[].detail`, then `error`, then `message`),
+scrubbed of anything that looks like a token, truncated and attached to the failure, so the dialog
+reads e.g. *"The source answered with HTTP error 400. (HTTP 400 · Error validating /contentRating/3:
+Does not have a value in the enumeration …)"*. The URL written to the log goes through
+`net/redactUrl`, which masks the value of any `token`/`key`/`secret`/`password`/`session`/`cookie`
+query parameter; no header, cookie or credential is ever logged (the sources use unauthenticated
+`GET` only).
+
+### 3.4 Verification
+
+* Offline: `MangaDexContractTests` + `SourceTests` (local `FakeServer`) — 0 failed of 150.
+* Live, read-only: `python3 scripts/check_mangadex.py` reproduces the same URLs against
+  `https://api.mangadex.org` and checks browse, title search, `contentRating[]=pornographic`,
+  `status[]`, details, feed, `/at-home/server` and one page image (bytes counted, never written to
+  disk). It also asserts the *old* invalid requests are still rejected, so nobody "simplifies" the
+  enumeration back. The same job runs in CI (`MangaDex read-only check`, informational).
+
+  Result of the CI run on 2026-10-27 (`MangaDex read-only check`, GET only, no credentials):
+
+  ```
+  PASS browse / popular                               HTTP 200
+  PASS search by title                                HTTP 200
+  PASS search with contentRating[]=pornographic       HTTP 200
+  PASS search with status[]=completed                 HTTP 200
+  PASS details of a title                             HTTP 200
+  PASS chapter feed (all content ratings)             HTTP 200
+  PASS page list (at-home server)                     HTTP 200
+  PASS first page image (bytes counted, never saved)  HTTP 200 · 987774 bytes, image/png
+  PASS regression: contentRating[]=porn is still rejected          HTTP 400 · validation_exception
+  PASS regression: a scalar status is still rejected               HTTP 400 · validation_exception
+  PASS regression: offset beyond the result window is still rejected HTTP 400 · bad_request_http_exception
+  11/11 checks passed
+  ```
+
+  The script cannot run from the sandbox used to write this (outbound access is limited to
+  GitHub/PyPI/npm, so it reports `TLS/SSL connection has been closed` instead of crashing), which is
+  why it runs as a CI job; the table above is its output, copied from the report the job comments on
+  the pull request. The same endpoints were also probed by hand while diagnosing, with the old
+  parameters next to the new ones:
+
+  | Request | 0.2.0 | Now |
+  | --- | --- | --- |
+  | `GET /manga?…order[followedCount]=desc` | 200 | 200 |
+  | `GET /manga?title=…&order[relevance]=desc` | 200 | 200 |
+  | `GET /manga?…&status[]=completed` | (n/a) | 200 |
+  | `GET /manga?…&contentRating[]=pornographic` | **400** | 200 |
+  | `GET /manga/{id}` | 200 | 200 |
+  | `GET /manga/{id}/feed?…contentRating[]=pornographic` | **400** | 200 (chapters listed) |
+  | `GET /at-home/server/{id}` | 200 | 200 |
 
 ## 4. OPDS 1.2 (implemented, catalogues added by the user)
 
@@ -136,7 +226,9 @@ Failure surfaces:
    optionally `imageHeaders`/`checkAvailability`.
 2. Register the instance in `SourceRegistry.rebuild()` with a stable `id` (it is written to
    `library.json`, the backup and `sources.json`).
-3. Add tests in `desktop/src/test/.../SourceTests.kt` that run against `FakeServer` — no real site.
+3. Add tests in `desktop/src/test/.../SourceTests.kt` (protocol) and, when the request parameters
+   are part of the risk, in `MangaDexContractTests`-style tests that assert the exact query string —
+   no real site.
 4. Update this document and `docs/FEATURE_MATRIX.md`.
 
 For the parser pack, the missing piece is a JVM `MangaLoaderContext`:

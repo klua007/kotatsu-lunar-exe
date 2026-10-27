@@ -17,7 +17,6 @@ import org.koitharu.kotatsu.desktop.ui.Ui
 import java.awt.GraphicsEnvironment
 import java.nio.file.Paths
 import javax.swing.SwingUtilities
-import javax.swing.UIManager
 
 private const val TAG = "Main"
 
@@ -87,15 +86,18 @@ fun main(args: Array<String>) {
 	}
 
 	I18n.setLanguage(repo.settings.language)
-	Theme.set(repo.settings.theme)
+	// Theme.set() installs the Look and Feel and only then publishes the palette: the Windows Look
+	// and Feel ignores the colours of the components it paints natively (buttons, check boxes,
+	// combo boxes), which is what produced unreadable dark-theme buttons in 0.2.0.
+	Theme.set(repo.settings.theme, repo.settings.uiScale)
 
 	if (GraphicsEnvironment.isHeadless()) {
 		System.err.println("No graphical environment available. Use --smoke-test for a headless check.")
 		System.exit(2)
 	}
 
-	runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-		.onFailure { Log.w(TAG, "System look and feel unavailable", it) }
+	// The Look and Feel is owned by Theme (see Theme.install()); installing anything here would
+	// throw the palette away again.
 
 	SwingUtilities.invokeLater {
 		runCatching {

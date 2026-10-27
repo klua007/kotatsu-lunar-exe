@@ -48,8 +48,10 @@ class LibraryPanel(
 ) : JPanel(BorderLayout()), Screen {
 
 	private val searchField: JTextField = Ui.searchField(tr(K.LIBRARY_SEARCH_HINT)) { reload() }
-	private val filterBox = JComboBox(arrayOf(tr(K.LIBRARY_FILTER_ALL), tr(K.LIBRARY_FILTER_FAVOURITES), tr(K.LIBRARY_FILTER_DOWNLOADED)))
-	private val sortBox = JComboBox<SortChoice>()
+	private val filterBox = Ui.comboBox(
+		listOf(tr(K.LIBRARY_FILTER_ALL), tr(K.LIBRARY_FILTER_FAVOURITES), tr(K.LIBRARY_FILTER_DOWNLOADED)),
+	)
+	private val sortBox = Ui.comboBox<SortChoice>(emptyList())
 	private val grid = JPanel(WrapLayout(java.awt.FlowLayout.LEFT, 12, 12))
 	private val gridScroll = JScrollPane(grid)
 	private val emptyState = createEmptyState()
@@ -156,7 +158,12 @@ class LibraryPanel(
 		add(Ui.label(tr(K.LIBRARY_EMPTY_HINT), Theme.baseFont, Theme.onSurfaceVariant).apply { alignmentX = CENTER_ALIGNMENT })
 		add(Ui.vgap(12))
 		add(
-			Ui.accentButton(tr(K.NAV_HUB)) { navigator.showHub() }.apply { alignmentX = CENTER_ALIGNMENT },
+			Ui.accentButton(tr(K.MENU_FILE_OPEN_ARCHIVE)) { navigator.importLocalFiles() }
+				.apply { alignmentX = CENTER_ALIGNMENT },
+		)
+		add(Ui.vgap(6))
+		add(
+			Ui.button(tr(K.NAV_HUB)) { navigator.showHub() }.apply { alignmentX = CENTER_ALIGNMENT },
 		)
 	}
 

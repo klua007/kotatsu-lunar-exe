@@ -13,6 +13,11 @@ Online content comes from two real sources: **MangaDex** (public API) and **OPDS
 whether they answer, search, filter, add a title and read it. The other ~900 sources of the Android
 app are listed there as unavailable *with the reason* — nothing is faked.
 
+**0.2.1** fixes the MangaDex `HTTP 400` of 0.2.0 (the chapter-feed request used
+`contentRating[]=porn`, which the API rejects: the enumerated value is `pornographic`) and the dark
+theme, whose controls were painted by the native Look and Feel with their own colours. Details in
+[`CHANGELOG.md`](CHANGELOG.md).
+
 * **Prefer português?** Veja a seção [Português (Brasil)](#português-brasil) no fim deste arquivo.
 
 | | |
@@ -21,6 +26,8 @@ app are listed there as unavailable *with the reason* — nothing is faked.
 | Language / UI toolkit | Kotlin 2.1 / Swing (JDK 17) |
 | Runtime dependencies | none beyond the bundled Java runtime |
 | Licence | GPL-3.0 (same as upstream) |
+| Version | **0.2.1** — single source of truth: `desktop/…/core/BuildInfo.kt` (`APP_VERSION`), read back by the build scripts, Gradle, the `User-Agent` and CI |
+| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Upstream commit | `d45b7c13de260b6c78de78ccbf968daf2187f1cf` |
 | Online sources | MangaDex + OPDS implemented and tested offline; the Android parser pack is not bundled ([`docs/SOURCES.md`](docs/SOURCES.md)) |
 | Status | reading flow complete for local **and** online content — see [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) |
@@ -30,7 +37,7 @@ app are listed there as unavailable *with the reason* — nothing is faked.
 ## 1. Install and run
 
 **Downloads:** [Releases](https://github.com/klua007/kotatsu-lunar-exe/releases) —
-`KotatsuLunar-0.2.0-windows-x64-portable.zip`, `KotatsuLunar-0.2.0.msi` and `kotatsu-lunar.jar`
+`KotatsuLunar-0.2.1-windows-x64-portable.zip`, `KotatsuLunar-0.2.1.msi` and `kotatsu-lunar.jar`
 built and smoke-tested on a Windows runner by
 [this workflow](https://github.com/klua007/kotatsu-lunar-exe/actions/workflows/build-windows.yml).
 
@@ -119,12 +126,14 @@ Folder\One.cbz, Folder\Two.cbz              -> two titles
 * Offline copies of chapters as CBZ under the application data folder.
 * **Backup export/import in the Android Kotatsu format** (favourites, categories, history, bookmarks,
   settings, sources) plus merging rules that never delete local data.
-* **Online sources**: MangaDex (search, filters, details, chapters, pages, downloads, mirror
-  failover) and OPDS catalogues; Hub with enable/disable, pinning, availability checks, per-source
-  error messages and a "load more" page step.
-* Light/dark theme, English and **Brazilian Portuguese** UI.
-* `--smoke-test` self check (22 checks) and a 112-case test suite, including the source layer against
-  a local HTTP server (no internet needed).
+* **Online sources**: MangaDex (search, status filter, adult-content switch, details, chapters,
+  pages, downloads, mirror failover) and OPDS catalogues; Hub with enable/disable, pinning,
+  availability checks, per-source error messages and a "load more" page step.
+* Light/dark theme with **WCAG AA contrast**, an interface scale setting (100–200 %) and a visible
+  keyboard focus ring on every control; English and **Brazilian Portuguese** UI.
+* `--smoke-test` self check (22 checks) and a **150-case** test suite, including the source layer and
+  the MangaDex request contract against a local HTTP server (no internet needed), plus a read-only
+  live check script (`scripts/check_mangadex.py`) that CI also runs.
 
 Not implemented yet (and not claimed): the ~900 Android parsers (the Hub explains why for each
 listed source), cross-device sync, tracking services, statistics screen, bookmarks UI, WebP/AVIF
@@ -154,6 +163,15 @@ KOTLINC_HOME=/opt/kotlin JAVA_HOME=/usr/lib/jvm/temurin-17 scripts/build.sh
 Gradle users can also run `gradle jar`, `gradle desktopTests`, `gradle packageImage`,
 `gradle packageMsi` or `gradle packagePortable` from `desktop/`. Details, including how the CI job
 works and how to sign the installer, are in [`docs/BUILD.md`](docs/BUILD.md).
+
+The version is **not** typed into the scripts: change `APP_VERSION` in
+`desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt` and every artefact, the
+`User-Agent` and the CI workflow follow. To verify the MangaDex source against the live API without
+opening the app (GET only, no account, nothing written to disk):
+
+```bash
+python3 scripts/check_mangadex.py            # 11 read-only checks + 3 regression guards
+```
 
 ## 5. Migrating from Android
 
@@ -221,6 +239,9 @@ ler e baixar capítulos. As outras ~900 fontes do app Android aparecem listadas 
 2. Clique duas vezes numa capa, escolha o capítulo e comece a ler.
 3. O progresso é salvo automaticamente e aparece em **Histórico**.
 
+* **0.2.1**: corrigido o `HTTP 400` do MangaDex (a lista de capítulos enviava `contentRating[]=porn`;
+  o valor enumerado pela API é `pornographic`) e o tema escuro, cujos controles eram pintados pelo
+  Look and Feel nativo com as próprias cores. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
 * Modos de leitura: padrão, da direita para a esquerda, vertical e Webtoon (`M` alterna).
 * Zoom: `+`/`-`/`0`, `Ctrl` + roda do mouse; `W` ajusta à largura, `H` à altura.
 * Sumário: `T`. Próximo/anterior capítulo: `N`/`P`. Salvar página: `S`. Tela cheia: `F11`.
@@ -238,9 +259,9 @@ ler e baixar capítulos. As outras ~900 fontes do app Android aparecem listadas 
 
 ### O que funciona nas fontes online
 
-* **MangaDex**: busca por título, interruptor de conteúdo adulto, filtro por tags, capítulos em
-  inglês e português, lista de capítulos com volume/número/grupo, páginas, capas, downloads e troca
-  de espelho com fallback automático.
+* **MangaDex**: busca por título, filtro por status de publicação, interruptor de conteúdo adulto,
+  filtro por tags, capítulos em inglês e português, lista de capítulos com volume/número/grupo,
+  páginas, capas, downloads e troca de espelho com fallback automático.
 * **OPDS**: catálogo do usuário, navegação biblioteca → série, busca OpenSearch, capítulos em
   CBZ/ZIP, download e leitura offline.
 * Mensagens de erro específicas para: sem rede, tempo esgotado, HTTP 4xx/5xx, limite de requisições

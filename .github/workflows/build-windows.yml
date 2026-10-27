@@ -21,10 +21,14 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 env:
   KOTLIN_VERSION: '2.1.21'
-  APP_VERSION: '0.2.0'
+  # APP_VERSION is *not* set here: it is read from desktop/.../core/BuildInfo.kt by the
+  # "Resolve application version" step, so a release can never ship an artefact whose installer,
+  # .exe and jar disagree with the compiled code.
 
 jobs:
   windows:
@@ -36,6 +40,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve application version
+        run: |
+          $file = "desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt"
+          $match = Select-String -Path $file -Pattern 'const val APP_VERSION = "([0-9][0-9A-Za-z.+-]*)"' |
+            Select-Object -First 1
+          if (-not $match) { throw "APP_VERSION not found in $file" }
+          $version = $match.Matches[0].Groups[1].Value
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "APP_VERSION=$version (read from $file)"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -125,8 +139,12 @@ jobs:
 
       - name: Smoke test the jar
         run: |
-          & java -jar build\dist\kotatsu-lunar.jar --version
+          $version = & java -jar build\dist\kotatsu-lunar.jar --version
           if ($LASTEXITCODE -ne 0) { throw "jar --version failed" }
+          Write-Host "jar reports: $version"
+          if ($version.Trim() -ne "Kotatsu Lunar $env:APP_VERSION") {
+            throw "the jar reports '$version' but BuildInfo.kt declares $env:APP_VERSION"
+          }
           & java -jar build\dist\kotatsu-lunar.jar --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "jar smoke test failed" }
 
@@ -192,6 +210,15 @@ jobs:
               Report-Failure "Packaged launcher: --version failed" "build\exe-version.log"
               throw ".exe --version exited with $versionCode"
             }
+            # The launcher is built by jpackage with --app-version; it must print the version that
+            # BuildInfo.kt actually declares, otherwise the installer name would lie.
+            $reported = (Get-Content "build\exe-version.log" -ErrorAction SilentlyContinue |
+              Where-Object { $_ -match 'Kotatsu Lunar' } | Select-Object -First 1)
+            if (-not $reported -or $reported.Trim() -ne "Kotatsu Lunar $env:APP_VERSION") {
+              Report-Failure "Packaged launcher: version mismatch" "build\exe-version.log"
+              throw ".exe reports '$reported' but BuildInfo.kt declares $env:APP_VERSION"
+            }
+            Write-Host "launcher reports: $reported"
             $smokeCode = Invoke-Launcher $exe "--smoke-test" "build\exe-smoke.log"
             if ($smokeCode -ne 0) {
               Report-Failure "Packaged launcher: smoke test failed" "build\exe-smoke.log"
@@ -281,6 +308,10 @@ jobs:
           path: build/dist/*.msi
           if-no-files-found: warn
 
+  # Read-only smoke test against the live public API. It is informational (never blocks the
+  # build): a MangaDex outage must not turn a green build red, but a change of the API must be
+  # visible in the job summary the same day.
+
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -297,3 +328,82 @@ jobs:
             * `kotatsu-lunar.jar` — runnable jar (`java -jar`), requires Java 17+.
 
             Licensed under GPL-3.0-or-later. Credits and limitations: see README.md and NOTICE.md.
+
+  mangadex-live-check:
+    name: MangaDex read-only check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run the read-only check
+        run: |
+          python3 scripts/check_mangadex.py | tee mangadex-check.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "## MangaDex read-only check"
+            echo
+            echo '```'
+            cat mangadex-check.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the report on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- mangadex-readonly-check -->';
+            const report = fs.existsSync('mangadex-check.txt')
+              ? fs.readFileSync('mangadex-check.txt', 'utf8').trim()
+              : '(no report produced)';
+            const { owner, repo } = context.repo;
+            let number = context.payload.pull_request ? context.payload.pull_request.number : null;
+            if (!number) {
+              const head = `${owner}:${context.ref.replace('refs/heads/', '')}`;
+              const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head });
+              number = prs.data.length ? prs.data[0].number : null;
+            }
+            if (!number) {
+              core.info('no pull request for this ref; the report stays in the job summary');
+              return;
+            }
+            const body = [
+              marker,
+              '## MangaDex read-only check',
+              '',
+              '`scripts/check_mangadex.py` against the live API — GET only, no credentials.',
+              '',
+              '```', report, '```',
+              '',
+              `Run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            const existing = comments.data.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            }
+            core.info(`report posted to pull request #${number}`);
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangadex-readonly-check
+          path: mangadex-check.txt
+          if-no-files-found: warn

@@ -173,7 +173,9 @@ See [`BACKUP_FORMAT.md`](BACKUP_FORMAT.md) for exactly what is migrated.
 ## Settings
 
 * Interface language: English or Português (Brasil). Restart to apply everywhere.
-* Theme: dark or light. Restart to repaint every component.
+* Theme: dark or light, applied immediately — the whole window is repainted, no restart needed.
+* Interface scale: 100–200 %, applied immediately to every application font (useful on high-DPI
+  screens).
 * Reader defaults: reading mode, background (black / gray / white), page gap, preloading, automatic
   progress saving, Ctrl+wheel zoom.
 * Storage: shows the data/cache/download folders and the cache size; **Clear cache** removes decoded
@@ -190,6 +192,8 @@ See [`BACKUP_FORMAT.md`](BACKUP_FORMAT.md) for exactly what is migrated.
 | A title shows no pages | the path moved or the archive is damaged; use **Refresh**, or re-import. |
 | **Explore** shows "no connection" | the machine is offline or blocked by a firewall; **Check** a source to see the exact failure. |
 | An online title will not open | the source may be down (check the card) or the chapter was removed upstream; refresh the chapter list. |
+| "The source answered with HTTP error 400" | the response body of the API is shown after the status: read it, it names the parameter the server refused. Check the log (**Help → Open log folder**) for the URL — query values of `token`/`key`/`secret`/`password`/`session`/`cookie` are masked there. |
+| Dark-theme buttons are hard to read | fixed in 0.2.1: the theme is installed as a Look and Feel, so the native Windows colours no longer override it. If a control still looks wrong, raise **Interface scale** and report the component. |
 | Pages from an online source do not appear | the image host may be blocked; open the log (**Help → Open log folder**) — the failing URL is recorded. |
 | Library looks empty after moving the profile | check `%APPDATA%\KotatsuLunar`; the app reads `library.json` there (or in the portable folder). |
 | Something crashes | `%APPDATA%\KotatsuLunar\logs\kotatsu.log` has the stack trace; **Help → Open log folder**. |

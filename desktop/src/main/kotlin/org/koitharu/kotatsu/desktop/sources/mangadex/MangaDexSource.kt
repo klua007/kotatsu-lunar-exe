@@ -47,7 +47,9 @@ import org.koitharu.kotatsu.desktop.sources.SourceOutcome
 import org.koitharu.kotatsu.desktop.sources.net.EndpointChooser
 import org.koitharu.kotatsu.desktop.sources.net.HttpRequestSpec
 import org.koitharu.kotatsu.desktop.sources.net.HttpTransport
+import org.koitharu.kotatsu.desktop.sources.net.apiErrorMessage
 import org.koitharu.kotatsu.desktop.sources.net.joinUrl
+import org.koitharu.kotatsu.desktop.sources.net.redactUrl
 import org.koitharu.kotatsu.desktop.sources.net.urlWithQuery
 import java.time.OffsetDateTime
 
@@ -111,7 +113,9 @@ class MangaDexSource(
 				} else {
 					add("order[latestUploadedChapter]" to "desc")
 				}
-				filters.states.firstOrNull()?.let { add("status" to it.lowercase()) }
+				// `status` is an array parameter as well (`status[]`); sending a plain string is
+				// rejected with HTTP 400 "String value found, but an array is required".
+				filters.states.mapNotNull { normalizeState(it) }.forEach { add("status[]" to it) }
 				add("hasAvailableChapters" to "true")
 			}
 			val json = api("/manga", params)
@@ -191,25 +195,65 @@ class MangaDexSource(
 			throw SourceException(SourceFailure.io(e.message ?: e.javaClass.simpleName, url))
 		}
 		if (!result.isSuccessful) {
-			throw SourceException(SourceFailure.http(result.code, url, result.retryAfterSeconds()))
+			// The body of a 4xx explains *what* was rejected (a wrong parameter, a bad uuid, …);
+			// keep it in the failure so the UI can show it and the log can be read without a proxy.
+			val serverMessage = apiErrorMessage(result)
+			Log.w(
+				TAG,
+				"GET ${redactUrl(url)} → HTTP ${result.code}" +
+					(serverMessage?.let { ": $it" } ?: "") +
+					" (body: ${result.body.size} bytes)",
+			)
+			throw SourceException(
+				SourceFailure.http(result.code, url, result.retryAfterSeconds(), serverMessage),
+			)
 		}
 		return result.text()
 	}
 
 	private fun baseQuery(page: Int, includeNsfw: Boolean = false): List<Pair<String, String?>> = buildList {
-		add("limit" to pageSize.toString())
-		add("offset" to (page * pageSize).coerceAtLeast(0).toString())
+		val limit = pageSize.coerceIn(1, MAX_PAGE_SIZE)
+		add("limit" to limit.toString())
+		// The API rejects `offset + limit > 10 000` (see the "Result window is too large" error),
+		// so deep pagination is clamped instead of producing a 400.
+		add("offset" to clampedOffset(page, limit).toString())
 		add("includes[]" to "cover_art")
 		add("includes[]" to "author")
 		add("includes[]" to "artist")
 		addAll(contentRatingParams(includeNsfw))
 	}
 
+	/** Offset for a page, always inside the result window the API accepts. */
+	private fun clampedOffset(page: Int, limit: Int): Int =
+		(page * limit).coerceAtLeast(0).coerceAtMost(MAX_RESULT_WINDOW - limit)
+
+	/** Maps a UI state to one of the API's enumerated values; unknown states are dropped. */
+	private fun normalizeState(state: String): String? {
+		val normalized = state.trim().lowercase()
+		return when (normalized) {
+			"ongoing", "completed", "hiatus", "cancelled", "canceled" ->
+				if (normalized == "canceled") "cancelled" else normalized
+			"finished" -> "completed"
+			"paused", "on_hold" -> "hiatus"
+			else -> null
+		}
+	}
+
+	/**
+	 * `contentRating[]` is an *enumerated* parameter: the API rejects the whole request with
+	 * HTTP 400 (validation_exception) when a value is not one of
+	 * `safe`, `suggestive`, `erotica`, `pornographic`.
+	 *
+	 * The desktop port used to send `porn` (the value the Android parser library maps to), which
+	 * made *every* chapter-list request fail with
+	 * `Error validating /contentRating/3: Does not have a value in the enumeration …` — see
+	 * docs/SOURCES.md. The correct spelling is `pornographic`.
+	 */
 	private fun contentRatingParams(includeNsfw: Boolean): List<Pair<String, String?>> {
-		val ratings = mutableListOf("safe", "suggestive")
+		val ratings = mutableListOf(CONTENT_RATING_SAFE, CONTENT_RATING_SUGGESTIVE)
 		if (includeNsfw) {
-			ratings += "erotica"
-			ratings += "porn"
+			ratings += CONTENT_RATING_EROTICA
+			ratings += CONTENT_RATING_PORNOGRAPHIC
 		}
 		return ratings.map { "contentRating[]" to it }
 	}
@@ -279,8 +323,11 @@ class MangaDexSource(
 		var complete = true
 		var iterations = 0
 		while (true) {
+			// The feed accepts a page size of 500, but the 10 000-row result window still applies:
+			// `offset + limit` must stay below it or the API answers HTTP 400.
+			val limit = FEED_PAGE_SIZE.coerceIn(1, MAX_RESULT_WINDOW - offset)
 			val params = buildList {
-				add("limit" to FEED_PAGE_SIZE.toString())
+				add("limit" to limit.toString())
 				add("offset" to offset.toString())
 				add("order[volume]" to "asc")
 				add("order[chapter]" to "asc")
@@ -293,9 +340,10 @@ class MangaDexSource(
 			val data = json.arr("data")?.items.orEmpty().mapNotNull { it.asObj() }
 			data.forEach { entity -> parseChapter(entity)?.let(collected::add) }
 			val total = json.int("total") ?: data.size
-			offset += FEED_PAGE_SIZE
+			offset += limit
 			iterations++
-			if (data.isEmpty() || offset >= total || iterations >= MAX_FEED_PAGES) {
+			val windowExhausted = offset + limit > MAX_RESULT_WINDOW
+			if (data.isEmpty() || offset >= total || iterations >= MAX_FEED_PAGES || windowExhausted) {
 				if (offset < total) complete = false
 				break
 			}
@@ -370,6 +418,24 @@ class MangaDexSource(
 		const val PUBLIC_BASE = "https://mangadex.org"
 		const val COVER_BASE = "https://uploads.mangadex.org"
 		const val REFERER = "https://mangadex.org/"
+
+		/** Enumerated values accepted by `contentRating[]`. */
+		const val CONTENT_RATING_SAFE = "safe"
+		const val CONTENT_RATING_SUGGESTIVE = "suggestive"
+		const val CONTENT_RATING_EROTICA = "erotica"
+		const val CONTENT_RATING_PORNOGRAPHIC = "pornographic"
+
+		/** Values accepted by `status[]`. */
+		val STATES: List<String> = listOf("ongoing", "completed", "hiatus", "cancelled")
+
+		/** Highest `limit` a collection endpoint accepts (`/manga`; the feed allows 500). */
+		const val MAX_PAGE_SIZE = 100
+
+		/**
+		 * `offset + limit` must stay within this window; asking beyond it is a HTTP 400
+		 * ("Result window is too large") instead of an empty page.
+		 */
+		const val MAX_RESULT_WINDOW = 10_000
 
 		private const val FEED_PAGE_SIZE = 500
 		private const val MAX_FEED_PAGES = 20

@@ -23,7 +23,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$AppVersion = "0.2.0",
+    # Defaults to the version declared in BuildInfo.kt, which is the only place it is written.
+    [string]$AppVersion = "",
     [switch]$SkipTests
 )
 
@@ -34,6 +35,19 @@ $JarName = "kotatsu-lunar.jar"
 $MainClass = "org.koitharu.kotatsu.desktop.MainKt"
 $TestClass = "org.koitharu.kotatsu.desktop.test.TestSuiteKt"
 $AppName = "KotatsuLunar"
+$BuildInfoFile = Join-Path $Root "desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt"
+
+# --- Version ------------------------------------------------------------------------------------
+# Read from BuildInfo.kt so the jar, the .exe, the installer and the README can never drift apart.
+function Get-AppVersion {
+    if (-not (Test-Path $BuildInfoFile)) { Fail "BuildInfo.kt not found at $BuildInfoFile" }
+    $match = Select-String -Path $BuildInfoFile -Pattern 'const val APP_VERSION = "([0-9][0-9A-Za-z.\-+]*)"' |
+        Select-Object -First 1
+    if (-not $match) { Fail "APP_VERSION not found in $BuildInfoFile" }
+    return $match.Matches[0].Groups[1].Value
+}
+if (-not $AppVersion) { $AppVersion = Get-AppVersion }
+if ($AppVersion -notmatch '^[0-9]') { Fail "unusable version '$AppVersion'" }
 
 function Fail($message) {
     Write-Host "error: $message" -ForegroundColor Red

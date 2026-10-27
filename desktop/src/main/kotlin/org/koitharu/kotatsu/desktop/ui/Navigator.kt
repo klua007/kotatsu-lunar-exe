@@ -29,6 +29,12 @@ interface Navigator {
 
 	/** Re-reads the library from disk and repaints the current screen. */
 	fun refreshAll()
+
+	/** Re-applies the theme (and the interface scale) to every open window. */
+	fun applyTheme() = Unit
+
+	/** Opens the "import files" dialog of the main window (used by the empty states). */
+	fun importLocalFiles() = Unit
 }
 
 /** Screens implement this to reload their content when they become visible. */
