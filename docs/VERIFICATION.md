@@ -29,7 +29,7 @@ kotlinc : <kotlinc>/bin/kotlinc
 version : 0.2.1                      <- read from BuildInfo.kt, not typed into the script
 -- compiling 49 source files
 -- compiling 11 test files
-142/142 tests passed
+150/150 tests passed
 Kotatsu Lunar 0.2.1
 Smoke test: 22 checks, 0 failure(s)
 Build OK
@@ -55,15 +55,15 @@ Smoke test: 22 checks, 0 failure(s)
 Build OK
 ```
 
-Additional checks (142-case suite):
+Additional checks (150-case suite):
 
 | Check | Result |
 | --- | --- |
-| Test suite (`TestSuiteKt`) | 142/142 passed |
+| Test suite (`TestSuiteKt`) | 150/150 passed |
 | `java -jar kotatsu-lunar.jar --version` | `Kotatsu Lunar 0.2.1` |
 | `java -jar kotatsu-lunar.jar --smoke-test` | 22 checks, 0 failures |
 | MangaDex request contract (`MangaDexContractTests`) | passed — asserts the exact query string for browse, search, status filter, adult content ratings, `limit`/`offset` bounds, error bodies and pagination flow, against a local server |
-| Theme (`ThemeTests`) | passed — both palettes meet WCAG AA (4.5:1 text, 3:1 for borders and the progress bar), the palette reaches `UIManager`, the Look and Feel is the application's own, themed controls are legible including disabled text, and the focus ring is painted. Found and fixed one real defect: the progress bar's accent on its track was 2.84:1 (now 4.6:1). |
+| Theme (`ThemeTests`) | passed — both palettes meet WCAG AA (4.5:1 text, 3:1 for borders and the progress bar), the palette reaches `UIManager`, the Look and Feel is the application's own, themed controls are legible including disabled text, and the focus ring is painted. It also **renders** every opaque control and reads the pixels back, so a Look and Feel that paints its own (light) face over a light foreground fails the suite. Two real defects were found this way: the progress bar's accent on its track (2.84:1 → 4.6:1) and, before that, the palette being discarded by `setLookAndFeel`. |
 | Online source layer | exercised end to end against a local `com.sun.net.httpserver` instance inside the suite: search, browse, details, chapter feed, page images, covers, CBZ/archive download, OPDS catalogues, mirror failover, availability checks |
 | Failure paths | offline port, timeout, 404, 429 + `Retry-After`, 500, malformed JSON, malformed XML, empty feed — each mapped to a distinct message (tests) |
 | Source state | `sources.json` enable/pin/mirror/availability round-trip, OPDS add/remove/dedupe, backup export/import of sources |
@@ -85,7 +85,7 @@ this repository and **passes**:
 | --- | --- |
 | Resolve application version from `BuildInfo.kt` | `0.2.1` |
 | Compile desktop sources (Kotlin 2.1.21, JDK 17 Temurin) | passed |
-| Run test suite (`TestSuiteKt`, 142 checks) | passed |
+| Run test suite (`TestSuiteKt`, 150 checks) | passed |
 | Build runnable jar | passed |
 | Smoke test the jar (`java -jar … --version`, asserted against `BuildInfo.kt`, then `--smoke-test`) | passed |
 | Package native application (`jpackage` app-image, WiX installed) | passed |
@@ -129,9 +129,25 @@ What the workflow cannot check automatically, and therefore still needs a human 
     `result":"ok"`, and the *old* `contentRating[]=porn` and scalar `status=` were rejected with HTTP 400
     (recorded in `docs/SOURCES.md` §3.4);
   * by the CI job `MangaDex read-only check`, which runs the same script on a GitHub runner with real
-    internet access and ended **success** (all 11 checks: 8 endpoints + 3 regression guards). Its
-    report is attached to the run as the artifact `mangadex-readonly-check` and commented on the pull
-    request.
+    internet access and ended **success — 11/11**:
+
+    ```
+    PASS browse / popular                               HTTP 200
+    PASS search by title                                HTTP 200
+    PASS search with contentRating[]=pornographic       HTTP 200
+    PASS search with status[]=completed                 HTTP 200
+    PASS details of a title                             HTTP 200
+    PASS chapter feed (all content ratings)             HTTP 200
+    PASS page list (at-home server)                     HTTP 200
+    PASS first page image (bytes counted, never saved)  HTTP 200 · 987774 bytes, image/png
+    PASS regression: contentRating[]=porn is still rejected          HTTP 400 · validation_exception
+    PASS regression: a scalar status is still rejected               HTTP 400 · validation_exception
+    PASS regression: offset beyond the result window is still rejected HTTP 400 · bad_request_http_exception
+    11/11 checks passed
+    ```
+
+    Its report is attached to the run as the artifact `mangadex-readonly-check` and commented on the
+    pull request.
   The OPDS client is still only validated against a local server reproducing the protocol, never against
   a live self-hosted catalogue — an OPDS user is the one who should try that first.
 * Sync and tracking are still not implemented, and the ~900 Android parsers are not bundled

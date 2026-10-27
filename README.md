@@ -131,7 +131,7 @@ Folder\One.cbz, Folder\Two.cbz              -> two titles
   availability checks, per-source error messages and a "load more" page step.
 * Light/dark theme with **WCAG AA contrast**, an interface scale setting (100–200 %) and a visible
   keyboard focus ring on every control; English and **Brazilian Portuguese** UI.
-* `--smoke-test` self check (22 checks) and a **142-case** test suite, including the source layer and
+* `--smoke-test` self check (22 checks) and a **150-case** test suite, including the source layer and
   the MangaDex request contract against a local HTTP server (no internet needed), plus a read-only
   live check script (`scripts/check_mangadex.py`) that CI also runs.
 

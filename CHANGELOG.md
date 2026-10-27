@@ -46,8 +46,9 @@ name and this file cannot disagree.
 
 ### Verified
 
-* 142 test cases (was 112): the source layer, the MangaDex request contract and pagination, error
-  bodies, both themes' contrast and rendering, storage, CBZ, backups, reader geometry and UI panels.
+* 150 test cases (was 112): the source layer, the MangaDex request contract and pagination, error
+  bodies, both themes' contrast and *rendering* (every opaque control is painted off-screen and its
+  pixels compared with the palette), storage, CBZ, backups, reader geometry and UI panels.
 * `java -jar kotatsu-lunar.jar --smoke-test`: 22 checks, 0 failures.
 * Windows CI (`.github/workflows/build-windows.yml`): compile, tests, jar, `jpackage` app-image,
   `KotatsuLunar.exe --version` / `--smoke-test` (with a version-match assertion), portable `.zip`

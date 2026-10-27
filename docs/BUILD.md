@@ -76,7 +76,7 @@ on plugin resolution.
 
 ## 4. Tests
 
-The suite is a plain Kotlin program (no JUnit), **142 checks** (they are grouped, so a failure names
+The suite is a plain Kotlin program (no JUnit), **150 checks** (they are grouped, so a failure names
 the test it belongs to). Everything that would need the internet
 runs against a local `com.sun.net.httpserver` instance (`desktop/src/test/.../FakeServer.kt`), so the
 suite is reproducible offline and in CI:
@@ -151,7 +151,7 @@ be visible in the job summary the same day).
 1. JDK 17 (Temurin) + WiX toolset;
 2. Kotlin compiler 2.1.21 downloaded from the official release;
 3. resolves the version from `BuildInfo.kt` (the build stops if it cannot be read);
-4. `scripts/build-windows.ps1` → compile, test suite (142 checks, offline), jar, app image, portable zip, MSI;
+4. `scripts/build-windows.ps1` → compile, test suite (150 checks, offline), jar, app image, portable zip, MSI;
 5. verifies the packaged `KotatsuLunar.exe` with `--version` (asserting it reports the version from
    `BuildInfo.kt`) and `--smoke-test`;
 6. uploads the portable zip, the jar and the MSI as artifacts (and to the release for `v*` tags);

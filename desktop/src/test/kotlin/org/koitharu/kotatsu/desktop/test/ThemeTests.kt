@@ -33,12 +33,16 @@ object ThemeTests {
 	private const val AA = 4.5
 	private const val AA_UI = 3.0
 
+	/** Disabled controls carry information too ("why is this greyed out"), just not at AA. */
+	private const val AA_DISABLED = 3.0
+
 	fun run() {
 		listOf(ThemeMode.DARK, ThemeMode.LIGHT).forEach { mode ->
 			Theme.set(mode)
 			paletteTests(mode)
 			defaultsTests(mode)
 			controlTests(mode)
+			paintedControlTests(mode)
 			focusRingTests(mode)
 		}
 		Theme.set(ThemeMode.DARK)
@@ -208,9 +212,94 @@ object ThemeTests {
 				Theme.contrastRatio(Theme.readableOn(dominant), dominant).format(2) + ":1",
 			Theme.contrastRatio(Theme.readableOn(dominant), dominant) >= AA,
 		)
+		TestRunner.assertTrue(
+			"the button is not white-on-white",
+			Theme.contrastRatio(button.foreground, dominant) >= AA,
+		)
+	}
+
+	}
+
+	/**
+	 * The properties are not enough: the Windows Look and Feel paints buttons, fields and combo
+	 * boxes with its own skin and ignores `background`, which is how 0.2.0 got light native
+	 * controls with light text. Painting each control and reading the pixels back catches it.
+	 */
+	private fun paintedControlTests(mode: ThemeMode) = TestRunner.suite("Theme · ${mode.name.lowercase()} painted controls") {
+		TestRunner.test("opaque controls are painted with the theme surface, not the Look and Feel's own") {
+			fun painted(name: String, component: javax.swing.JComponent, expected: Color) {
+				component.setSize(200, 44)
+				val dominant = dominantColour(render(component, 200, 44))
+				TestRunner.assertTrue(
+					"$name is painted with ${expected.hex()} (dominant ${dominant.hex()})",
+					distance(dominant, expected) <= 14.0,
+				)
+				val ratio = Theme.contrastRatio(component.foreground, dominant)
+				TestRunner.assertTrue(
+					"$name text is legible on what is really painted: ${ratio.format(2)}:1",
+					ratio >= AA,
+				)
+			}
+
+			painted("Ui.button", Ui.button("Save"), Theme.surfaceVariant)
+			painted("Ui.accentButton", Ui.accentButton("Search"), Theme.accentSolid)
+			painted("Ui.textField", Ui.textField("solo leveling"), Theme.surfaceVariant)
+			painted("Ui.comboBox", Ui.comboBox(listOf("All", "Favourites")), Theme.surfaceVariant)
+			painted("Ui.spinner", Ui.spinner(SpinnerNumberModel(100, 100, 200, 5)), Theme.surfaceVariant)
+			painted("Ui.textArea", Ui.textArea("text"), Theme.surfaceVariant)
+			painted("JProgressBar", javax.swing.JProgressBar().apply { value = 40 }, Theme.surfaceVariant)
+		}
+
+		TestRunner.test("transparent controls keep the panel's surface and a legible foreground") {
+			fun overPanel(name: String, component: javax.swing.JComponent) {
+				component.setSize(200, 44)
+				val dominant = dominantColour(render(component, 200, 44))
+				val ratio = Theme.contrastRatio(component.foreground, dominant)
+				TestRunner.assertTrue(
+					"$name paints on ${dominant.hex()} with ${ratio.format(2)}:1",
+					ratio >= AA,
+				)
+			}
+
+			overPanel("Ui.checkBox", Ui.checkBox("Show adult content", true))
+			overPanel("Ui.label", Ui.label("Library"))
+			overPanel("JList", javax.swing.JList(arrayOf("Solo Leveling", "Berserk")))
+			overPanel(
+				"JTable",
+				javax.swing.JTable(
+					arrayOf(arrayOf("Solo Leveling", "179")),
+					arrayOf("Title", "Chapter"),
+				),
+			)
+		}
+
+		TestRunner.test("a menu bar is painted with the theme surfaces") {
+			val menu = javax.swing.JMenuBar().apply {
+				add(javax.swing.JMenu("File").apply { add(javax.swing.JMenuItem("Open CBZ/ZIP…")) })
+			}
+			menu.setSize(240, 32)
+			val dominant = dominantColour(render(menu, 240, 32))
+			// The menu bar sits on a raised surface, so [Theme.surface] is expected; what matters is
+			// that it is one of *our* colours and not the native face.
+			val ours = listOf(Theme.background, Theme.surface, Theme.surfaceVariant)
 			TestRunner.assertTrue(
-				"the button is not white-on-white",
-				Theme.contrastRatio(button.foreground, dominant) >= AA,
+				"menu bar painted with a theme surface, not the native one (dominant ${dominant.hex()})",
+				ours.any { distance(dominant, it) <= 14.0 },
+			)
+			val ratio = Theme.contrastRatio(Theme.readableOn(dominant), dominant)
+			TestRunner.assertTrue("menu bar text: ${ratio.format(2)}:1", ratio >= AA)
+		}
+
+		TestRunner.test("a disabled control stays legible on what is really painted") {
+			val button = Ui.button("Download").apply {
+				isEnabled = false
+				setSize(200, 44)
+			}
+			val dominant = dominantColour(render(button, 200, 44))
+			val ratio = Theme.contrastRatio(button.foreground, dominant)
+			TestRunner.assertTrue(
+				"disabled text on ${dominant.hex()}: ${ratio.format(2)}:1 (needs ${AA_DISABLED}:1)",
+				ratio >= AA_DISABLED,
 			)
 		}
 	}

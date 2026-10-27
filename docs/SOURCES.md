@@ -110,17 +110,37 @@ query parameter; no header, cookie or credential is ever logged (the sources use
 
 ### 3.4 Verification
 
-* Offline: `MangaDexContractTests` + `SourceTests` (local `FakeServer`) — 0 failed of 142.
+* Offline: `MangaDexContractTests` + `SourceTests` (local `FakeServer`) — 0 failed of 150.
 * Live, read-only: `python3 scripts/check_mangadex.py` reproduces the same URLs against
   `https://api.mangadex.org` and checks browse, title search, `contentRating[]=pornographic`,
   `status[]`, details, feed, `/at-home/server` and one page image (bytes counted, never written to
   disk). It also asserts the *old* invalid requests are still rejected, so nobody "simplifies" the
   enumeration back. The same job runs in CI (`MangaDex read-only check`, informational).
 
-  Result of the run made while fixing this (2026-10-26, from a network-restricted sandbox through an
-  HTTP fetcher, GET only):
+  Result of the CI run on 2026-10-27 (`MangaDex read-only check`, GET only, no credentials):
 
-  | Request | Old value | New value |
+  ```
+  PASS browse / popular                               HTTP 200
+  PASS search by title                                HTTP 200
+  PASS search with contentRating[]=pornographic       HTTP 200
+  PASS search with status[]=completed                 HTTP 200
+  PASS details of a title                             HTTP 200
+  PASS chapter feed (all content ratings)             HTTP 200
+  PASS page list (at-home server)                     HTTP 200
+  PASS first page image (bytes counted, never saved)  HTTP 200 · 987774 bytes, image/png
+  PASS regression: contentRating[]=porn is still rejected          HTTP 400 · validation_exception
+  PASS regression: a scalar status is still rejected               HTTP 400 · validation_exception
+  PASS regression: offset beyond the result window is still rejected HTTP 400 · bad_request_http_exception
+  11/11 checks passed
+  ```
+
+  The script cannot run from the sandbox used to write this (outbound access is limited to
+  GitHub/PyPI/npm, so it reports `TLS/SSL connection has been closed` instead of crashing), which is
+  why it runs as a CI job; the table above is its output, copied from the report the job comments on
+  the pull request. The same endpoints were also probed by hand while diagnosing, with the old
+  parameters next to the new ones:
+
+  | Request | 0.2.0 | Now |
   | --- | --- | --- |
   | `GET /manga?…order[followedCount]=desc` | 200 | 200 |
   | `GET /manga?title=…&order[relevance]=desc` | 200 | 200 |
@@ -129,11 +149,6 @@ query parameter; no header, cookie or credential is ever logged (the sources use
   | `GET /manga/{id}` | 200 | 200 |
   | `GET /manga/{id}/feed?…contentRating[]=pornographic` | **400** | 200 (chapters listed) |
   | `GET /at-home/server/{id}` | 200 | 200 |
-
-  The same script was **not** able to run from the sandbox itself (outbound access is limited to
-  GitHub/PyPI/npm — the script reports `TLS/SSL connection has been closed` instead of crashing); the
-  table above was produced with an HTTP fetcher that does have access, and the script is executed for
-  real by the CI job.
 
 ## 4. OPDS 1.2 (implemented, catalogues added by the user)
 
