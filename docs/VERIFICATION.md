@@ -18,7 +18,31 @@ Commands run:
 KOTLINC_HOME=<kotlin> JAVA_HOME=<jdk> OUT_DIR=/tmp/build-offline bash scripts/build.sh
 ```
 
+### 1.1: 0.2.1 re-run (after the MangaDex and theme fixes)
+
+```
+KOTLINC_HOME=<kotlin> JAVA_HOME=<jdk> OUT_DIR=<out> bash scripts/build.sh
+```
+
+```
+kotlinc : <kotlinc>/bin/kotlinc
+version : 0.2.1                      <- read from BuildInfo.kt, not typed into the script
+-- compiling 49 source files
+-- compiling 11 test files
+142/142 tests passed
+Kotatsu Lunar 0.2.1
+Smoke test: 22 checks, 0 failure(s)
+Build OK
+wrote <out>/dist/kotatsu-lunar.jar 2409461 bytes
+```
+
+### 1.0: the 0.2.0 baseline this session started from
+
 Result:
+
+```
+KOTLINC_HOME=<kotlinc> JAVA_HOME=<jdk> OUT_DIR=<out> bash scripts/build.sh
+```
 
 ```
 -- compiling 48 source files
@@ -31,13 +55,15 @@ Smoke test: 22 checks, 0 failure(s)
 Build OK
 ```
 
-Additional checks:
+Additional checks (142-case suite):
 
 | Check | Result |
 | --- | --- |
-| Test suite (`TestSuiteKt`) | 112/112 passed |
-| `java -jar kotatsu-lunar.jar --version` | `Kotatsu Lunar 0.2.0` |
+| Test suite (`TestSuiteKt`) | 142/142 passed |
+| `java -jar kotatsu-lunar.jar --version` | `Kotatsu Lunar 0.2.1` |
 | `java -jar kotatsu-lunar.jar --smoke-test` | 22 checks, 0 failures |
+| MangaDex request contract (`MangaDexContractTests`) | passed — asserts the exact query string for browse, search, status filter, adult content ratings, `limit`/`offset` bounds, error bodies and pagination flow, against a local server |
+| Theme (`ThemeTests`) | passed — both palettes meet WCAG AA (4.5:1 text, 3:1 for borders and the progress bar), the palette reaches `UIManager`, the Look and Feel is the application's own, themed controls are legible including disabled text, and the focus ring is painted. Found and fixed one real defect: the progress bar's accent on its track was 2.84:1 (now 4.6:1). |
 | Online source layer | exercised end to end against a local `com.sun.net.httpserver` instance inside the suite: search, browse, details, chapter feed, page images, covers, CBZ/archive download, OPDS catalogues, mirror failover, availability checks |
 | Failure paths | offline port, timeout, 404, 429 + `Retry-After`, 500, malformed JSON, malformed XML, empty feed — each mapped to a distinct message (tests) |
 | Source state | `sources.json` enable/pin/mirror/availability round-trip, OPDS add/remove/dedupe, backup export/import of sources |
@@ -57,14 +83,16 @@ this repository and **passes**:
 
 | Step | Result |
 | --- | --- |
+| Resolve application version from `BuildInfo.kt` | `0.2.1` |
 | Compile desktop sources (Kotlin 2.1.21, JDK 17 Temurin) | passed |
-| Run test suite (`TestSuiteKt`, 112 checks) | passed |
+| Run test suite (`TestSuiteKt`, 142 checks) | passed |
 | Build runnable jar | passed |
-| Smoke test the jar (`java -jar … --version`, `--smoke-test`) | passed |
+| Smoke test the jar (`java -jar … --version`, asserted against `BuildInfo.kt`, then `--smoke-test`) | passed |
 | Package native application (`jpackage` app-image, WiX installed) | passed |
-| **Verify the produced `.exe`** (`KotatsuLunar.exe --version` and `--smoke-test`, exit code checked) | passed |
+| **Verify the produced `.exe`** (`KotatsuLunar.exe --version` asserted against `BuildInfo.kt`, and `--smoke-test`, exit code checked) | passed |
 | Build portable `.zip` and `.msi` | passed |
-| Upload artifacts | `kotatsu-lunar-windows-x64-portable` (48 MB), `kotatsu-lunar-jar` (1 MB), `kotatsu-lunar-windows-x64-msi` (48 MB) |
+| Upload artifacts | `kotatsu-lunar-windows-x64-portable`, `kotatsu-lunar-jar`, `kotatsu-lunar-windows-x64-msi` (all named after the resolved version) |
+| `MangaDex read-only check` job (live API, GET only, non-blocking) | passed — 11/11 checks; report uploaded as `mangadex-readonly-check` and commented on the pull request |
 
 So, on Windows: the application **compiles, its tests pass, the packaged `KotatsuLunar.exe` starts,
 prints the version and completes the 22-check end-to-end smoke test** (create CBZ → import → read
@@ -74,7 +102,10 @@ fails if any of those steps returns a non-zero exit code.
 What the workflow cannot check automatically, and therefore still needs a human on a Windows desktop:
 
 * the interactive GUI: window sizing/DPI, cover grid wrapping, double-click behaviour, drag and drop
-  from Explorer, mouse panning in the reader, font rendering;
+  from Explorer, mouse panning in the reader, font rendering. The *colours* are now covered by
+  `ThemeTests` (contrast ratios computed from the palette, both themes, including disabled text and
+  the focus ring), but nothing has looked at a real screen — the first Windows run should confirm the
+  dark theme reads as intended;
 * the `.msi` installation flow (install, Start-menu shortcut, uninstall);
 * behaviour with real content in exotic layouts (nested folders, very large archives).
 
@@ -90,11 +121,19 @@ What the workflow cannot check automatically, and therefore still needs a human 
 * The MSI needs the WiX 3.x toolset; CI installs it with Chocolatey (`continue-on-error`, so a failure
   only drops the MSI, never the portable package).
 * WebP/AVIF/JXL pages are not decoded.
-* **No real source was contacted from this sandbox.** Outbound access is limited to GitHub/PyPI/npm, so
-  the MangaDex and OPDS clients were validated against a local server reproducing their documented
-  responses (`desktop/src/test/.../FakeServer.kt`), never against the live sites. A real-world run is
-  the first thing to try on a Windows machine with internet; if an endpoint changed, the source
-  reports an "invalid response" failure instead of crashing.
+* **The sandbox itself cannot reach MangaDex** (outbound access is limited to GitHub/PyPI/npm, so
+  `scripts/check_mangadex.py` reports `TLS/SSL connection has been closed` there). The live, read-only
+  verification therefore happened in two places:
+  * by issuing the exact URLs the parser builds through an HTTP fetcher that does have access — browse,
+    search, `status[]`, `contentRating[]=pornographic`, details, feed and `/at-home/server` all answered
+    `result":"ok"`, and the *old* `contentRating[]=porn` and scalar `status=` were rejected with HTTP 400
+    (recorded in `docs/SOURCES.md` §3.4);
+  * by the CI job `MangaDex read-only check`, which runs the same script on a GitHub runner with real
+    internet access and ended **success** (all 11 checks: 8 endpoints + 3 regression guards). Its
+    report is attached to the run as the artifact `mangadex-readonly-check` and commented on the pull
+    request.
+  The OPDS client is still only validated against a local server reproducing the protocol, never against
+  a live self-hosted catalogue — an OPDS user is the one who should try that first.
 * Sync and tracking are still not implemented, and the ~900 Android parsers are not bundled
   (see `FEATURE_MATRIX.md` and `SOURCES.md`).
 * The Hub was painted off-screen and inspected as an image; like every other screen it has never been

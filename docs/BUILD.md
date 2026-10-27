@@ -23,8 +23,14 @@ Result:
 | --- | --- | --- |
 | jar | `build\dist\kotatsu-lunar.jar` | runnable with `java -jar` |
 | app image | `build\package\KotatsuLunar\KotatsuLunar.exe` | native launcher + bundled runtime |
-| portable zip | `build\dist\KotatsuLunar-0.2.0-windows-x64-portable.zip` | unzip and run, no install |
-| MSI | `build\dist\KotatsuLunar-0.2.0.msi` | installer (needs the WiX toolset) |
+| portable zip | `build\dist\KotatsuLunar-<version>-windows-x64-portable.zip` | unzip and run, no install |
+| MSI | `build\dist\KotatsuLunar-<version>.msi` | installer (needs the WiX toolset) |
+
+`<version>` is read from `APP_VERSION` in
+`desktop/src/main/kotlin/org/koitharu/kotatsu/desktop/core/BuildInfo.kt`. Nothing else needs editing
+when the version changes: the jar's `--version` output, the `User-Agent` of the HTTP sources, the
+installer name and the CI artifact names all follow. Pass `-AppVersion` to `build-windows.ps1` only to
+override that deliberately (the script refuses to build when the constant cannot be read).
 
 The script fails if the jar or the launcher cannot run `--version` and `--smoke-test`, so a broken
 package can never be uploaded.
@@ -70,7 +76,8 @@ on plugin resolution.
 
 ## 4. Tests
 
-The suite is a plain Kotlin program (no JUnit), 112 checks. Everything that would need the internet
+The suite is a plain Kotlin program (no JUnit), **142 checks** (they are grouped, so a failure names
+the test it belongs to). Everything that would need the internet
 runs against a local `com.sun.net.httpserver` instance (`desktop/src/test/.../FakeServer.kt`), so the
 suite is reproducible offline and in CI:
 
@@ -97,6 +104,8 @@ Coverage:
 | Reader geometry | fit width/height, zoom clamping, pan clamping, continuous scale |
 | UI panels | every main panel (library, hub, details, history, downloads, settings) is constructed and painted off-screen (headless) without errors |
 | Online sources | MangaDex and OPDS protocol parsing, page/cover URLs, chapter lists, image download and caching, CBZ downloads, archive rejection, mirror failover, availability checks |
+| MangaDex request contract | the exact query string the parser builds: `contentRating[]` enumeration, `status[]` array, `limit`/`offset` bounds, error bodies from the API, pagination flow |
+| Theme | both palettes meet WCAG AA (4.5:1 text, 3:1 borders/progress bar), the palette reaches `UIManager`, the Look and Feel is the app's own, themed controls are legible (including disabled text) and the focus ring is painted |
 | Network failures | offline host, timeout, 404, 429 + `Retry-After`, 5xx, invalid JSON/XML, empty feed — each mapped to a distinct message |
 | Source state | enable/pin/mirror persistence in `sources.json`, OPDS catalogue add/dedupe/remove, backup round trip, "a failing source never touches local data" |
 
@@ -121,12 +130,30 @@ open **Explore**, **Check** MangaDex, search, open a result, read two pages, go 
 page cache was used, **Download** a chapter, turn the network off and reopen it, then add an OPDS
 catalogue of your own server and repeat.
 
+Without leaving the terminal, the same contract can be validated against the live API — 11 read-only
+checks (browse, search, status, adult ratings, details, feed, page list, one page image) plus 3
+regression guards asserting the *old* requests are still rejected:
+
+```bash
+python3 scripts/check_mangadex.py                  # GET only, no account, nothing written to disk
+python3 scripts/check_mangadex.py --json           # machine readable
+python3 scripts/check_mangadex.py --base https://api.mangadex.dev
+```
+
+It exits non-zero if any check fails, and CI runs it as the informational job
+`MangaDex read-only check` (a MangaDex outage must not turn a green build red, but an API change must
+be visible in the job summary the same day).
+
 ## 6. CI
 
 `.github/workflows/build-windows.yml` runs on `windows-latest` for every push, pull request and tag:
 
 1. JDK 17 (Temurin) + WiX toolset;
 2. Kotlin compiler 2.1.21 downloaded from the official release;
-3. `scripts/build-windows.ps1` → compile, test suite (112 checks, offline), jar, app image, portable zip, MSI;
-4. verifies the packaged `KotatsuLunar.exe` with `--version` and `--smoke-test`;
-5. uploads the portable zip, the jar and the MSI as artifacts (and to the release for `v*` tags).
+3. resolves the version from `BuildInfo.kt` (the build stops if it cannot be read);
+4. `scripts/build-windows.ps1` → compile, test suite (142 checks, offline), jar, app image, portable zip, MSI;
+5. verifies the packaged `KotatsuLunar.exe` with `--version` (asserting it reports the version from
+   `BuildInfo.kt`) and `--smoke-test`;
+6. uploads the portable zip, the jar and the MSI as artifacts (and to the release for `v*` tags);
+7. runs `scripts/check_mangadex.py` against the live API as a separate, non-blocking job that also
+   comments the report on the pull request.
